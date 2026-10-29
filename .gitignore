@@ -15,3 +15,7 @@ qrcodes_lotes/
 
 # Windows download markers
 *Zone.Identifier
+
+# Images with report links/tokens or real names (kept locally only)
+qr_tarefa_*.png
+arquivos antigos/pdf_exemplo.png

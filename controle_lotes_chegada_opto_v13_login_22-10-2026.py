@@ -16,7 +16,8 @@ import math
 import re
 import webbrowser
 from pathlib import Path
-from PIL import Image
+from PIL import Image, ImageChops
+import io
 
 # Caixas menores (lotes internos) são registradas como DUNE-CX-0001, DUNE-CX-0002, ...
 PREFIXO_CAIXA = "DUNE-CX-"
@@ -955,22 +956,32 @@ def _cabecalho_pdf(k, titulo, subtitulo):
     mm = k["mm"]
 
     def logo(nome, alinhamento):
+        """Logo sem as margens brancas do arquivo, com até 22 mm de altura e 35 mm de largura."""
         try:
             with Image.open(nome) as im:
-                w, h = im.size
-            altura = 13 * mm
-            return RLImage(nome, width=altura * w / h, height=altura, hAlign=alinhamento)
+                im = im.convert("RGB")
+            branco = Image.new("RGB", im.size, (255, 255, 255))
+            caixa = ImageChops.difference(im, branco).point(lambda p: 255 if p > 20 else 0).getbbox()
+            if caixa:
+                im = im.crop(caixa)
+            buf = io.BytesIO()
+            im.save(buf, "PNG")
+            buf.seek(0)
+            w, h = im.size
+            escala = min(22 * mm / h, 35 * mm / w)
+            return RLImage(buf, width=w * escala, height=h * escala, hAlign=alinhamento)
         except Exception:
             return ""
 
-    topo = k["Table"]([[logo("esquerda.png", "LEFT"),
+    topo = k["Table"]([[logo("esquerda.png", "CENTER"),
                         [k["Paragraph"](titulo[0], k["est_titulo"]), k["Paragraph"](titulo[1], k["est_titulo"]),
                          k["Paragraph"](subtitulo, k["est_sub"])],
                         logo("direita.png", "RIGHT")]],
                       colWidths=[40 * mm, k["largura"] - 80 * mm, 40 * mm])
     topo.setStyle(k["TableStyle"]([("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                                    ("LINEBELOW", (0, 0), (-1, 0), 1.5, k["azul"]),
-                                   ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]))
+                                   ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                                   ("ALIGN", (0, 0), (0, 0), "CENTER")]))
     return topo
 
 

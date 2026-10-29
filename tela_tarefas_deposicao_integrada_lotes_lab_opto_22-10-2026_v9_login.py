@@ -7,7 +7,8 @@ import qrcode
 import os
 import subprocess
 import sys
-from PIL import Image, ImageTk, ImageDraw, ImageFont
+from PIL import Image, ImageTk, ImageDraw, ImageFont, ImageChops
+import io
 import socket
 import threading
 import hmac
@@ -3429,11 +3430,20 @@ def gerar_pdf_relatorio(tarefa_id, caminho):
         return M("<b>Date:</b> " + txt(data) + " &nbsp;&nbsp;|&nbsp;&nbsp; <b>Performed by:</b> " + txt(quem))
 
     def logo(nome, alinhamento):
+        """Logo sem as margens brancas do arquivo, com até 22 mm de altura e 35 mm de largura."""
         try:
             with Image.open(nome) as im:
-                w, h = im.size
-            altura = 13 * mm
-            return RLImage(nome, width=altura * w / h, height=altura, hAlign=alinhamento)
+                im = im.convert("RGB")
+            branco = Image.new("RGB", im.size, (255, 255, 255))
+            caixa = ImageChops.difference(im, branco).point(lambda p: 255 if p > 20 else 0).getbbox()
+            if caixa:
+                im = im.crop(caixa)
+            buf = io.BytesIO()
+            im.save(buf, "PNG")
+            buf.seek(0)
+            w, h = im.size
+            escala = min(22 * mm / h, 35 * mm / w)
+            return RLImage(buf, width=w * escala, height=h * escala, hAlign=alinhamento)
         except Exception:
             return ""
 
@@ -3441,14 +3451,14 @@ def gerar_pdf_relatorio(tarefa_id, caminho):
     story = []
 
     # ---------------- cabeçalho ----------------
-    topo = Table([[logo("esquerda.png", "LEFT"),
+    topo = Table([[logo("esquerda.png", "CENTER"),
                    [Paragraph("DUNE HD – X-ARAPUCA PTP FILMS", est_titulo),
                     Paragraph("DEPOSITION INSPECTION RECORD", est_titulo),
                     Paragraph("Inspection of Evaporated PTP Film", est_sub)],
                    logo("direita.png", "RIGHT")]],
                  colWidths=[40 * mm, largura - 80 * mm, 40 * mm])
     topo.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LINEBELOW", (0, 0), (-1, 0), 1.5, AZUL),
-                              ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]))
+                              ("BOTTOMPADDING", (0, 0), (-1, -1), 6), ("ALIGN", (0, 0), (0, 0), "CENTER")]))
     story += [topo, Spacer(1, 6)]
 
     # ---------------- 1. informações da caixa ----------------
