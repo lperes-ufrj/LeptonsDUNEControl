@@ -1,0 +1,10 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv",
+  "python.terminal.activateEnvironment": true,
+  "files.exclude": {
+    "**/*Zone.Identifier": true,
+    "**/__pycache__": true,
+    "venv": true
+  },
+  "python-envs.defaultEnvManager": "ms-python.python:system"
+}

@@ -1,0 +1,31 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Deposition tasks (tela_tarefas v9)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tela_tarefas_deposicao_integrada_lotes_lab_opto_22-10-2026_v9_login.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Batch arrival control (controle_lotes v13)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/controle_lotes_chegada_opto_v13_login_22-10-2026.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Current file",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    }
+  ]
+}
