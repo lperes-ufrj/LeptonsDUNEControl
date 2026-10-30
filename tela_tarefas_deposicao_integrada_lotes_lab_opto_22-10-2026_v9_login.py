@@ -320,6 +320,7 @@ def inicializar_banco():
         ("position_range", "TEXT"),
         ("observacoes", "TEXT"),
         ("massa_ptp_g", "TEXT"),
+        ("lote_ptp", "TEXT"),
         ("imersao_observacoes", "TEXT"),
         ("imersao_data", "TEXT"),
         ("imersao_operador", "TEXT"),
@@ -503,9 +504,11 @@ def carregar_tarefas():
 
     # run / box PID / PIDs de controle (inspeção visual) também entram na busca
     extras_busca = {}
+    runs = {}
     cur.execute("SELECT id_tarefa, run_evaporation, box_pid, pid_p02, pid_p03, pid_p14 FROM inspecao_visual_cab")
     for r in cur.fetchall():
         extras_busca[r[0]] = " ".join(str(x) for x in r[1:] if x)
+        runs[r[0]] = r[1] or ""
     conn.close()
 
     _linhas_tarefas.clear()
@@ -516,6 +519,7 @@ def carregar_tarefas():
         valores[5] = f"{row[5]}/{N_FILTROS}"
         status, _pend = atualizar_status_tarefa(row[0])            # recalcula: vale também para tarefas antigas
         valores.insert(2, status or "-")
+        valores.insert(2, runs.get(row[0]) or "-")
         texto = " ".join(str(v) for v in valores if v is not None) + " " + str(row[2] or "") + " " + extras_busca.get(row[0], "")
         _linhas_tarefas.append((valores, status, texto.upper().replace("_", "-")))   # _ e - valem igual (planilha mistura)
 
@@ -1100,7 +1104,7 @@ def limpar_campos():
     limpar_eficiencia()
     limpar_signoff()
 
-    for e in [entry_a2, entry_d2, entry_a3, entry_d3, entry_a14, entry_d14, entry_ptp_mass]:
+    for e in [entry_a2, entry_d2, entry_a3, entry_d3, entry_a14, entry_d14, entry_ptp_mass, entry_ptp_lote]:
         e.delete(0, tk.END)
 
     for var in densidade_vars.values():
@@ -1196,6 +1200,7 @@ def validar_campos():
         "imersao_ok": imersao_var.get(),
         "data_hora_registro": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "massa_ptp_g": entry_ptp_mass.get().strip(),
+        "lote_ptp": entry_ptp_lote.get().strip(),
         "massas": massas,
         "densidades": densidades
     }
@@ -1215,13 +1220,13 @@ def salvar_tarefa():
         INSERT INTO tarefas
         (codigo_tarefa, responsavel, data_inicio, status, descricao,
          lote_entrada_id, codigo_lote, position_range, observacoes, anexos_txt,
-         eficiencia_optica_ok, valor_eficiencia, imersao_criogenica_ok, data_hora_registro, massa_ptp_g)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         eficiencia_optica_ok, valor_eficiencia, imersao_criogenica_ok, data_hora_registro, massa_ptp_g, lote_ptp)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         dados["serial"], dados["resp"], dados["data"], STATUS_INCOMPLETO, dados["tipo"],
         dados["lote_id"], dados["codigo_lote"], dados["posicao"], dados["obs"], dados["anexos_txt"],
         dados["eficiencia_ok"], dados["valor_eficiencia"], dados["imersao_ok"], dados["data_hora_registro"],
-        dados["massa_ptp_g"]
+        dados["massa_ptp_g"], dados["lote_ptp"]
     ))
 
     tarefa_id = cur.lastrowid
@@ -1280,7 +1285,7 @@ def preencher_formulario(cur, tarefa_id):
         SELECT codigo_tarefa, responsavel, data_inicio, descricao,
                lote_entrada_id, codigo_lote, position_range, observacoes,
                anexos_txt, eficiencia_optica_ok, valor_eficiencia,
-               imersao_criogenica_ok, massa_ptp_g
+               imersao_criogenica_ok, massa_ptp_g, lote_ptp
         FROM tarefas
         WHERE id = ?
     """, (tarefa_id,))
@@ -1299,7 +1304,7 @@ def preencher_formulario(cur, tarefa_id):
     carregar_eficiencia_db(cur, tarefa_id)
     carregar_signoff_db(cur, tarefa_id)
 
-    serial, resp, data, tipo, lote_id, codigo_lote, posicao, obs, anexos_txt, ef_ok, val_ef, im_ok, massa_ptp = row
+    serial, resp, data, tipo, lote_id, codigo_lote, posicao, obs, anexos_txt, ef_ok, val_ef, im_ok, massa_ptp, lote_ptp = row
 
     atualizar_lotes()
     definir_lotes_selecionados(buscar_lotes_da_tarefa(tarefa_id, lote_id, codigo_lote, cur))
@@ -1327,6 +1332,7 @@ def preencher_formulario(cur, tarefa_id):
     valor_ef_var.set(val_ef or "")
     imersao_var.set(im_ok or "Não")
     entry_ptp_mass.insert(0, massa_ptp or "")
+    entry_ptp_lote.insert(0, lote_ptp or "")
     atualizar_densidades()
     atualizar_resumos()
 
@@ -1369,13 +1375,13 @@ def editar_tarefa():
         SET codigo_tarefa = ?, responsavel = ?, data_inicio = ?, descricao = ?,
             lote_entrada_id = ?, codigo_lote = ?, position_range = ?, observacoes = ?,
             anexos_txt = ?, eficiencia_optica_ok = ?, valor_eficiencia = ?,
-            imersao_criogenica_ok = ?, data_hora_registro = ?, massa_ptp_g = ?
+            imersao_criogenica_ok = ?, data_hora_registro = ?, massa_ptp_g = ?, lote_ptp = ?
         WHERE id = ?
     """, (
         dados["serial"], dados["resp"], dados["data"], dados["tipo"],
         dados["lote_id"], dados["codigo_lote"], dados["posicao"], dados["obs"],
         dados["anexos_txt"], dados["eficiencia_ok"], dados["valor_eficiencia"],
-        dados["imersao_ok"], dados["data_hora_registro"], dados["massa_ptp_g"], tarefa_em_edicao_id
+        dados["imersao_ok"], dados["data_hora_registro"], dados["massa_ptp_g"], dados["lote_ptp"], tarefa_em_edicao_id
     ))
 
     salvar_lotes_db(cur, tarefa_em_edicao_id, dados["lotes"])
@@ -2848,13 +2854,100 @@ def linhas_da_tarefa(linhas, run, box_pid, pids):
     return achadas
 
 
-# campo do formulário -> (coluna em eficiencia_amostras, nome mostrado)
+# ---- Aba "Deposition Control" da mesma planilha (uma evaporação = 3 linhas: P02, P03, P14) ----
+COLUNAS_PLANILHA_DEP = {
+    "run": "RUN",
+    "box": "BOX PID",
+    "qtd": "QUANTITY",
+    "data": "EVAP",
+    "posicao": "POSITION",
+    "antes": "MASS BEFORE",
+    "depois": "MASS AFTER",
+    "ctrl": "CONTROL FILTER PID",
+    "ptp": "PTP BATCH",
+    "notas": "NOTES",
+}
+
+
+def ler_planilha_deposicao(caminho):
+    """Lê a aba 'Deposition Control'. Retorna (nome da aba, {run normalizado: dados da evaporação}).
+    Sem essa aba, retorna (None, {})."""
+    from openpyxl import load_workbook
+    wb = load_workbook(caminho, data_only=True, read_only=True)
+    try:
+        aba = next((ws for ws in wb.worksheets if "deposition" in ws.title.lower()), None)
+        if aba is None:
+            return None, {}
+        colunas = None
+        runs = {}
+        atual = None
+        for n, row in enumerate(aba.iter_rows(values_only=True), start=1):
+            if colunas is None:       # procura a linha de títulos
+                titulos = [str(c or "").strip().upper() for c in row]
+                achadas = {}
+                for chave, inicio in COLUNAS_PLANILHA_DEP.items():
+                    i = next((i for i, t in enumerate(titulos) if t.startswith(inicio)), None)
+                    if i is not None:
+                        achadas[chave] = i
+                if {"run", "posicao", "antes", "depois"} <= set(achadas):
+                    colunas = achadas
+                continue
+
+            def val(chave):
+                i = colunas.get(chave)
+                return row[i] if i is not None and i < len(row) else None
+
+            def texto(chave):
+                """Texto da célula; vazio para os modelos ainda não preenchidos (DUNE-XA-HD-#####-####)."""
+                v = _celula_planilha(val(chave))
+                return "" if "#" in v else v
+
+            # RUN fica só na primeira das 3 linhas; 'DUNE_EVAP_#  #' (sem número) é linha-modelo vazia
+            run = str(val("run") or "").strip()
+            if run:
+                if not re.search(r"#\s*\d+\s*#", run):
+                    atual = None
+                    continue
+                data = val("data")
+                atual = runs.setdefault(_norm_pid(run), {
+                    "run": run, "linha": n, "box": texto("box"), "qtd": texto("qtd"),
+                    "data": data.strftime("%Y-%m-%d") if hasattr(data, "strftime") else texto("data"),
+                    "ptp": "", "notas": [], "massas": {}, "pids": {}})
+            if atual is None:
+                continue
+            if texto("ptp") and not atual["ptp"]:
+                atual["ptp"] = texto("ptp")
+            if texto("notas"):
+                atual["notas"].append(texto("notas"))
+            ctrl = texto("ctrl")
+            m = re.search(r"P\s*(02|03|14)\b", (str(val("posicao") or "") + " " + ctrl).upper())
+            if not m:
+                continue
+            atual["massas"][int(m.group(1))] = (_celula_planilha(val("antes")), _celula_planilha(val("depois")), n)
+            if ctrl:
+                atual["pids"]["P" + m.group(1)] = ctrl
+        if colunas is None:
+            raise ValueError(f"Header row not found in sheet '{aba.title}' "
+                             "(expected columns 'RUN', 'POSITION', 'MASS BEFORE' and 'MASS AFTER').")
+        return aba.title, runs
+    finally:
+        wb.close()
+
+
+# ---- Sincronização da planilha inteira com as tarefas ----
+# campo da amostra de eficiência -> (coluna em eficiencia_amostras, nome mostrado)
 CAMPOS_SYNC_EF = {"testada": ("testada", "Tested?"), "antes": ("massa_antes", "Mass before (g)"),
                   "depois": ("massa_depois", "Mass after (g)"), "area": ("area_cm2", "Area (cm²)"),
                   "x": ("eficiencia", "Relative efficiency (x)")}
-# identificação da inspeção visual preenchida pela planilha quando estiver vazia
+# identificação (inspeção visual / tela principal) preenchida pela planilha quando estiver vazia
 CAMPOS_SYNC_IDENT = {"run_evaporation": "Run", "box_pid": "PID", "pid_p02": "P02 PID", "pid_p03": "P03 PID",
                      "pid_p14": "P14 PID"}
+# colunas da tabela tarefas vindas da aba Deposition Control
+CAMPOS_SYNC_TAREFA = {"data_inicio": "Deposition date", "position_range": "Position (filters)",
+                      "lote_ptp": "PTP batch", "observacoes": "Observations"}
+# massas das posições 2, 3 e 14 (Mass Control by Position)
+CAMPOS_SYNC_MASSA = {"m_antes": "Mass before (g)", "m_depois": "Mass after (g)"}
+POSICAO_AMOSTRA = {2: "P02", 3: "P03", 14: "P14"}
 
 
 def _mesmo_valor(a, b):
@@ -2879,72 +2972,208 @@ def valores_planilha_amostra(l, atual):
     return novos
 
 
-def _mudancas_alvo(alvo, pid, run, ident_atual, atuais, linhas, revisada=False):
-    """Diferenças entre a planilha e uma tarefa (alvo = id) ou o formulário (alvo = None)."""
-    pids = {a: ident_atual.get("pid_" + a.lower(), "") for a in AMOSTRAS_EFICIENCIA}
-    achadas = linhas_da_tarefa(linhas, run, ident_atual.get("box_pid", ""), pids)
+def _atual_vazio():
+    return {"tarefa": {}, "massas": {}, "ident": {}, "ef": {}}
+
+
+def _atual_db(cur, tid):
+    """Valores gravados de uma tarefa, no formato comparado com a planilha."""
+    atual = _atual_vazio()
+    cur.execute("SELECT data_inicio, position_range, lote_ptp, observacoes FROM tarefas WHERE id = ?", (tid,))
+    atual["tarefa"] = {k: (v or "") for k, v in zip(CAMPOS_SYNC_TAREFA, cur.fetchone() or ())}
+    cur.execute("SELECT posicao, massa_antes, massa_depois FROM massa_posicoes WHERE id_tarefa = ?", (tid,))
+    for pos, antes, depois in cur.fetchall():
+        atual["massas"][int(pos)] = {"m_antes": antes or "", "m_depois": depois or ""}
+    cur.execute("SELECT run_evaporation, box_pid, pid_p02, pid_p03, pid_p14 FROM inspecao_visual_cab "
+                "WHERE id_tarefa = ? ORDER BY id DESC", (tid,))
+    atual["ident"] = {k: (v or "") for k, v in zip(CAMPOS_SYNC_IDENT, cur.fetchone() or ())}
+    cur.execute("""
+        SELECT amostra, testada, massa_antes, massa_depois, area_cm2, eficiencia, comprimento_mm, largura_mm
+        FROM eficiencia_amostras WHERE id_tarefa = ?
+    """, (tid,))
+    for amostra, testada, antes, depois, area, x, comp, larg in cur.fetchall():
+        atual["ef"][amostra] = {"testada": testada or "", "antes": antes or "", "depois": depois or "",
+                                "area": area_amostra_ef({"area_cm2": area, "comprimento_mm": comp,
+                                                         "largura_mm": larg}), "x": x or ""}
+    return atual
+
+
+def _entradas_massa():
+    return {2: (entry_a2, entry_d2), 3: (entry_a3, entry_d3), 14: (entry_a14, entry_d14)}
+
+
+def _atual_formulario():
+    """Valores da tela principal (tarefa nova ainda não gravada)."""
+    atual = _atual_vazio()
+    atual["tarefa"] = {"data_inicio": entry_data.get().strip(), "position_range": entry_posicao.get().strip(),
+                       "lote_ptp": entry_ptp_lote.get().strip(), "observacoes": entry_obs.get("1.0", "end").strip()}
+    atual["massas"] = {p: {"m_antes": a.get().strip(), "m_depois": d.get().strip()}
+                       for p, (a, d) in _entradas_massa().items()}
+    atual["ident"] = {k: inspecao_vars["cab"][k].get().strip() for k in CAMPOS_SYNC_IDENT}
+    atual["ef"] = {a: {c: ef_vars["amostras"][a][c].get().strip() for c in CAMPOS_SYNC_EF}
+                   for a in AMOSTRAS_EFICIENCIA}
+    return atual
+
+
+def _mudancas_alvo(alvo, pid, atual, dep, linhas_ef, revisada=False):
+    """Diferenças entre a planilha (evaporação 'dep' da aba Deposition Control + linhas da aba Efficiency Test)
+    e um alvo: id da tarefa gravada, None = formulário, ("new", run) = tarefa que será criada."""
+    ident = dict(atual["ident"])
+    base = {"alvo": alvo, "pid": pid, "revisada": revisada}
     mudancas = []
-    base = {"alvo": alvo, "pid": pid, "run": run, "revisada": revisada}
+
+    def muda(tipo, item, campo, antigo, novo, aba, linha):
+        mudancas.append(dict(base, tipo=tipo, item=item, campo=campo, antigo=antigo, novo=novo, aba=aba, linha=linha))
+
+    def preenche_ident(campo, novo, aba, linha):
+        if novo and not ident.get(campo, "").strip():
+            muda("ident", "", campo, "", novo, aba, linha)
+            ident[campo] = novo
+
+    if dep:
+        linha = dep["linha"]
+        preenche_ident("run_evaporation", dep["run"], "Deposition", linha)
+        preenche_ident("box_pid", dep["box"], "Deposition", linha)
+        for amostra, ctrl in dep["pids"].items():
+            preenche_ident("pid_" + amostra.lower(), ctrl, "Deposition", linha)
+
+        t = atual["tarefa"]
+        novos = {"data_inicio": dep["data"], "lote_ptp": dep["ptp"]}
+        try:
+            if not t.get("position_range"):          # QUANTITY = 28 -> posições 1-28
+                novos["position_range"] = f"1-{int(converter_float(dep['qtd']))}"
+        except Exception:
+            pass
+        if not t.get("observacoes") and dep["notas"]:
+            novos["observacoes"] = "; ".join(dep["notas"])
+        for campo, novo in novos.items():
+            if novo and not _mesmo_valor(t.get(campo), novo):
+                muda("tarefa", "", campo, t.get(campo, ""), novo, "Deposition", linha)
+
+        for pos, (antes, depois, linha_m) in sorted(dep["massas"].items()):
+            m_atual = atual["massas"].get(pos, {})
+            for campo, novo in (("m_antes", antes), ("m_depois", depois)):
+                if novo and not _mesmo_valor(m_atual.get(campo), novo):
+                    muda("massa", pos, campo, m_atual.get(campo, ""), novo, "Deposition", linha_m)
+
+    # aba Efficiency Test: amostras P02/P03/P14 encontradas pelo RUN (ou PIDs) já conhecidos
+    pids = {a: ident.get("pid_" + a.lower(), "") for a in AMOSTRAS_EFICIENCIA}
+    achadas = linhas_da_tarefa(linhas_ef, ident.get("run_evaporation", ""), ident.get("box_pid", ""), pids)
     for amostra in AMOSTRAS_EFICIENCIA:
         l = achadas.get(amostra)
         if l is None:
             continue
-        atual = atuais.get(amostra, {})
-        for campo, novo in valores_planilha_amostra(l, atual).items():
-            antigo = atual.get(campo, "")
-            if not _mesmo_valor(antigo, novo):
-                mudancas.append(dict(base, amostra=amostra, campo=campo, antigo=antigo, novo=novo, linha=l["linha"]))
+        a_atual = atual["ef"].get(amostra, {})
+        for campo, novo in valores_planilha_amostra(l, a_atual).items():
+            if not _mesmo_valor(a_atual.get(campo, ""), novo):
+                muda("ef", amostra, campo, a_atual.get(campo, ""), novo, "Efficiency", l["linha"])
     if achadas:
         primeira = next(iter(achadas.values()))
-        novos_ident = {"run_evaporation": primeira["run"], "box_pid": primeira["box"]}
+        preenche_ident("run_evaporation", primeira["run"], "Efficiency", primeira["linha"])
+        preenche_ident("box_pid", primeira["box"], "Efficiency", primeira["linha"])
         for amostra, l in achadas.items():
-            novos_ident["pid_" + amostra.lower()] = l["ctrl"]
-        for campo, novo in novos_ident.items():
-            if novo and not ident_atual.get(campo, "").strip():
-                mudancas.append(dict(base, amostra="", campo=campo, antigo="", novo=novo, linha=primeira["linha"]))
+            preenche_ident("pid_" + amostra.lower(), l["ctrl"], "Efficiency", l["linha"])
     return mudancas
 
 
-def mudancas_planilha(linhas):
-    """Compara a planilha com todas as tarefas gravadas e com o formulário (se for uma tarefa nova)."""
+def _dep_da_tarefa(deps, ident, codigo):
+    """Evaporação da aba Deposition Control de uma tarefa: pelo RUN; senão, pelo BOX PID."""
+    chave = _norm_pid(ident.get("run_evaporation"))
+    if chave and chave in deps:
+        return chave
+    for pid in (ident.get("box_pid"), codigo):
+        if _norm_pid(pid):
+            achada = next((k for k, d in deps.items() if _norm_pid(d["box"]) == _norm_pid(pid)), None)
+            if achada:
+                return achada
+    return None
+
+
+def mudancas_planilha(linhas_ef, deps):
+    """Compara a planilha com todas as tarefas gravadas, com o formulário (tarefa nova) e lista as tarefas
+    a criar para os runs da aba Deposition Control que ainda não existem. Retorna (mudanças, nº de tarefas)."""
     mudancas = []
+    usadas = set()
     conn = conectar()
     cur = conn.cursor()
-    cur.execute("""
-        SELECT t.id, t.codigo_tarefa, COALESCE(t.qa_signoff_por, ''),
-               c.run_evaporation, c.box_pid, c.pid_p02, c.pid_p03, c.pid_p14
-        FROM tarefas t JOIN inspecao_visual_cab c ON c.id_tarefa = t.id
-        ORDER BY t.id
-    """)
+    cur.execute("SELECT id, codigo_tarefa, COALESCE(qa_signoff_por, '') FROM tarefas ORDER BY id")
     tarefas = cur.fetchall()
-    for tid, pid, signoff, *ident in tarefas:
-        ident_atual = {k: (v or "") for k, v in zip(CAMPOS_SYNC_IDENT, ident)}
-        cur.execute("""
-            SELECT amostra, testada, massa_antes, massa_depois, area_cm2, eficiencia, comprimento_mm, largura_mm
-            FROM eficiencia_amostras WHERE id_tarefa = ?
-        """, (tid,))
-        atuais = {}
-        for amostra, testada, antes, depois, area, x, comp, larg in cur.fetchall():
-            atuais[amostra] = {"testada": testada or "", "antes": antes or "", "depois": depois or "",
-                               "area": area_amostra_ef({"area_cm2": area, "comprimento_mm": comp,
-                                                        "largura_mm": larg}), "x": x or ""}
-        mudancas += _mudancas_alvo(tid, pid, ident_atual["run_evaporation"], ident_atual, atuais, linhas,
-                                   bool(signoff.strip()))
+    for tid, codigo, signoff in tarefas:
+        atual = _atual_db(cur, tid)
+        chave = _dep_da_tarefa(deps, atual["ident"], codigo)
+        if chave:
+            usadas.add(chave)
+        mudancas += _mudancas_alvo(tid, codigo or "-", atual, deps.get(chave), linhas_ef, bool(signoff.strip()))
     conn.close()
 
     if tarefa_em_edicao_id is None:      # tarefa nova, ainda não gravada: compara com o formulário
-        cab = inspecao_vars["cab"]
-        ident_atual = {k: cab[k].get().strip() for k in CAMPOS_SYNC_IDENT}
-        if any(ident_atual.values()):
-            atuais = {a: {c: ef_vars["amostras"][a][c].get().strip() for c in CAMPOS_SYNC_EF}
-                      for a in AMOSTRAS_EFICIENCIA}
-            mudancas += _mudancas_alvo(None, ident_atual["box_pid"] or "(new task, not saved)",
-                                       ident_atual["run_evaporation"], ident_atual, atuais, linhas)
+        atual = _atual_formulario()
+        if any(atual["ident"].values()):
+            chave = _dep_da_tarefa(deps, atual["ident"], "")
+            if chave:
+                usadas.add(chave)
+            mudancas += _mudancas_alvo(None, atual["ident"]["box_pid"] or "(new task, not saved)", atual,
+                                       deps.get(chave), linhas_ef)
+
+    for chave, dep in deps.items():
+        if chave not in usadas:
+            mudancas += _mudancas_alvo(("new", chave), dep["box"] or dep["run"], _atual_vazio(), dep, linhas_ef)
     return mudancas, len(tarefas)
 
 
+def _criar_tarefa_planilha(cur):
+    """Tarefa vazia (sem lote, responsável etc.) que a sincronização vai preencher."""
+    cur.execute("""
+        INSERT INTO tarefas
+        (codigo_tarefa, responsavel, data_inicio, status, descricao, lote_entrada_id, codigo_lote, position_range,
+         observacoes, anexos_txt, eficiencia_optica_ok, valor_eficiencia, imersao_criogenica_ok, data_hora_registro,
+         massa_ptp_g, lote_ptp)
+        VALUES ('', '', '', ?, 'Substrate', NULL, '', '', '', '', 'Não', '', 'Não', ?, '', '')
+    """, (STATUS_INCOMPLETO, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    return cur.lastrowid
+
+
+def _gravar_mudanca(cur, tid, m):
+    campo = m["campo"]
+    if m["tipo"] == "ident":
+        cur.execute("SELECT id FROM inspecao_visual_cab WHERE id_tarefa = ?", (tid,))
+        if cur.fetchone() is None:
+            cur.execute("INSERT INTO inspecao_visual_cab (id_tarefa) VALUES (?)", (tid,))
+        cur.execute(f"UPDATE inspecao_visual_cab SET {campo} = ? WHERE id_tarefa = ?", (m["novo"], tid))
+        if campo == "box_pid":     # o PID também identifica a tarefa
+            cur.execute("UPDATE tarefas SET codigo_tarefa = ? WHERE id = ? AND COALESCE(codigo_tarefa, '') = ''",
+                        (m["novo"], tid))
+    elif m["tipo"] == "tarefa":
+        cur.execute(f"UPDATE tarefas SET {campo} = ? WHERE id = ?", (m["novo"], tid))
+    elif m["tipo"] == "massa":
+        cur.execute("SELECT id FROM massa_posicoes WHERE id_tarefa = ? AND posicao = ?", (tid, m["item"]))
+        if cur.fetchone() is None:
+            cur.execute("INSERT INTO massa_posicoes (id_tarefa, posicao, massa_antes, massa_depois, "
+                        "densidade_massa_ug_cm2) VALUES (?, ?, '', '', '')", (tid, m["item"]))
+        coluna = "massa_antes" if campo == "m_antes" else "massa_depois"
+        cur.execute(f"UPDATE massa_posicoes SET {coluna} = ? WHERE id_tarefa = ? AND posicao = ?",
+                    (m["novo"], tid, m["item"]))
+    else:
+        cur.execute("SELECT id FROM eficiencia_amostras WHERE id_tarefa = ? AND amostra = ?", (tid, m["item"]))
+        if cur.fetchone() is None:
+            cur.execute("""INSERT INTO eficiencia_amostras
+                           (id_tarefa, amostra, testada, comprimento_mm, largura_mm, massa_antes, massa_depois,
+                            area_cm2, densidade_ug_cm2, eficiencia, aprovado)
+                           VALUES (?, ?, '', '', '', '', '', '', '', '', '')""", (tid, m["item"]))
+        cur.execute(f"UPDATE eficiencia_amostras SET {CAMPOS_SYNC_EF[campo][0]} = ? WHERE id_tarefa = ? AND amostra = ?",
+                    (m["novo"], tid, m["item"]))
+
+
 def _recalcular_amostras_db(cur, tarefa_id):
-    """Densidade e aprovação gravadas de cada amostra, a partir das massas, área e x."""
+    """Densidades e aprovação gravadas (posições 2/3/14 e amostras de eficiência), a partir das massas, área e x."""
+    cur.execute("SELECT id, massa_antes, massa_depois FROM massa_posicoes WHERE id_tarefa = ?", (tarefa_id,))
+    for rid, antes, depois in cur.fetchall():
+        try:
+            dens = f"{calcular_densidade_massa(antes, depois):.2f}"
+        except Exception:
+            dens = ""
+        cur.execute("UPDATE massa_posicoes SET densidade_massa_ug_cm2 = ? WHERE id = ?", (dens, rid))
+
     cur.execute("""SELECT id, testada, massa_antes, massa_depois, area_cm2, comprimento_mm, largura_mm, eficiencia
                    FROM eficiencia_amostras WHERE id_tarefa = ?""", (tarefa_id,))
     for rid, testada, antes, depois, area, comp, larg, x in cur.fetchall():
@@ -2962,30 +3191,48 @@ def _recalcular_amostras_db(cur, tarefa_id):
                     (dens, aprovado, rid))
 
 
-def aplicar_mudancas_planilha(mudancas, arquivo):
-    """Grava as mudanças nas tarefas e no formulário aberto."""
-    por_tarefa = {}
-    for m in mudancas:
-        por_tarefa.setdefault(m["alvo"], []).append(m)
+def _aplicar_no_formulario(lista):
+    for m in lista:
+        if m["tipo"] == "ident":
+            inspecao_vars["cab"][m["campo"]].set(m["novo"])
+        elif m["tipo"] == "ef":
+            ef_vars["amostras"][m["item"]][m["campo"]].set(m["novo"])
+        elif m["tipo"] == "massa":
+            entrada = _entradas_massa()[m["item"]][0 if m["campo"] == "m_antes" else 1]
+            entrada.delete(0, tk.END)
+            entrada.insert(0, m["novo"])
+        elif m["campo"] == "observacoes":
+            entry_obs.delete("1.0", tk.END)
+            entry_obs.insert("1.0", m["novo"])
+        else:
+            entrada = {"data_inicio": entry_data, "position_range": entry_posicao, "lote_ptp": entry_ptp_lote}[m["campo"]]
+            entrada.delete(0, tk.END)
+            entrada.insert(0, m["novo"])
+    atualizar_densidades()
 
+
+def aplicar_mudancas_planilha(mudancas, arquivo, criar_novas=True):
+    """Grava as mudanças nas tarefas (criando as novas, se pedido) e no formulário aberto.
+    Retorna (nº de mudanças gravadas, nº de tarefas criadas)."""
+    por_alvo = {}
+    for m in mudancas:
+        por_alvo.setdefault(m["alvo"], []).append(m)
+
+    ids = {}
     conn = conectar()
     cur = conn.cursor()
-    for tid, lista in por_tarefa.items():
-        if tid is None:
+    for alvo, lista in por_alvo.items():
+        if alvo is None:
             continue
-        for m in lista:
-            if m["campo"] in CAMPOS_SYNC_IDENT:
-                cur.execute(f"UPDATE inspecao_visual_cab SET {m['campo']} = ? WHERE id_tarefa = ?", (m["novo"], tid))
+        if isinstance(alvo, tuple):
+            if not criar_novas:
                 continue
-            coluna = CAMPOS_SYNC_EF[m["campo"]][0]
-            cur.execute("SELECT id FROM eficiencia_amostras WHERE id_tarefa = ? AND amostra = ?", (tid, m["amostra"]))
-            if cur.fetchone() is None:
-                cur.execute("""INSERT INTO eficiencia_amostras
-                               (id_tarefa, amostra, testada, comprimento_mm, largura_mm, massa_antes, massa_depois,
-                                area_cm2, densidade_ug_cm2, eficiencia, aprovado)
-                               VALUES (?, ?, '', '', '', '', '', '', '', '', '')""", (tid, m["amostra"]))
-            cur.execute(f"UPDATE eficiencia_amostras SET {coluna} = ? WHERE id_tarefa = ? AND amostra = ?",
-                        (m["novo"], tid, m["amostra"]))
+            tid = _criar_tarefa_planilha(cur)
+        else:
+            tid = alvo
+        ids[alvo] = tid
+        for m in lista:
+            _gravar_mudanca(cur, tid, m)
         _recalcular_amostras_db(cur, tid)
         if lista[0]["revisada"]:          # dados mudaram: a revisão anterior deixa de valer
             cur.execute("UPDATE tarefas SET qa_signoff_por = '', qa_signoff_data = '' WHERE id = ?", (tid,))
@@ -2993,7 +3240,7 @@ def aplicar_mudancas_planilha(mudancas, arquivo):
     conn.close()
 
     # resumo da eficiência na tabela de tarefas e situação (Incomplete / To be reviewed)
-    for tid in (t for t in por_tarefa if t is not None):
+    for tid in ids.values():
         d = coletar_dados_relatorio(tid)
         if d is None:
             continue
@@ -3006,60 +3253,78 @@ def aplicar_mudancas_planilha(mudancas, arquivo):
         conn.close()
         atualizar_status_tarefa(tid)
 
-    # formulário: tarefa nova, ou a tarefa gravada que está aberta para edição
-    # (tarefa_em_edicao_id vem da tabela como texto)
-    editada = next((t for t in por_tarefa if t is not None and str(t) == str(tarefa_em_edicao_id)), None)
-    for m in por_tarefa.get(None, []) + por_tarefa.get(editada, []):
-        if m["campo"] in CAMPOS_SYNC_IDENT:
-            inspecao_vars["cab"][m["campo"]].set(m["novo"])
-        else:
-            ef_vars["amostras"][m["amostra"]][m["campo"]].set(m["novo"])
-    if editada is not None and por_tarefa[editada][0]["revisada"]:
+    # formulário: tarefa nova, ou a tarefa gravada que está aberta para edição (o id vem da tabela como texto)
+    editada = next((a for a in por_alvo if isinstance(a, int) and str(a) == str(tarefa_em_edicao_id)), None)
+    _aplicar_no_formulario(por_alvo.get(None, []) + por_alvo.get(editada, []))
+    if editada is not None and por_alvo[editada][0]["revisada"]:
         limpar_signoff()
     atualizar_resumos()
 
-    for tid, lista in por_tarefa.items():
-        leptons_auth.registrar("EFFICIENCY_SYNC", f"id={tid if tid is not None else 'form'} PID={lista[0]['pid']} "
-                               f"file={arquivo} changes={len(lista)}"
+    novas = sum(1 for a in ids if isinstance(a, tuple))
+    for alvo, tid in ids.items():
+        lista = por_alvo[alvo]
+        leptons_auth.registrar("SHEET_SYNC", f"id={tid}{' (new)' if isinstance(alvo, tuple) else ''} "
+                               f"PID={lista[0]['pid']} file={arquivo} changes={len(lista)}"
                                + (" review_cleared" if lista[0]["revisada"] else ""))
+    if None in por_alvo:
+        leptons_auth.registrar("SHEET_SYNC", f"form PID={por_alvo[None][0]['pid']} file={arquivo} "
+                               f"changes={len(por_alvo[None])}")
     carregar_tarefas()
+    return sum(len(por_alvo[a]) for a in ids) + len(por_alvo.get(None, [])), novas
 
 
-def janela_mudancas_planilha(parent, mudancas, n_tarefas, arquivo, aba):
+def _nome_campo_sync(m):
+    return (CAMPOS_SYNC_IDENT.get(m["campo"]) or CAMPOS_SYNC_TAREFA.get(m["campo"])
+            or CAMPOS_SYNC_MASSA.get(m["campo"]) or CAMPOS_SYNC_EF[m["campo"]][1])
+
+
+def janela_mudancas_planilha(parent, mudancas, n_tarefas, arquivo, abas):
     """Mostra só o que a planilha vai mudar; grava ao clicar em Apply."""
     win = tk.Toplevel(parent)
     win.title("Sync Leptons Control Sheet – changes")
-    win.geometry("980x520")
+    win.geometry("1050x600")
     win.transient(parent)
     BG = "#f4f6f8"
     win.configure(bg=BG)
 
-    n_alvos = len({m["alvo"] for m in mudancas})
+    novas = {m["alvo"] for m in mudancas if isinstance(m["alvo"], tuple)}
+    existentes = {m["alvo"] for m in mudancas if not isinstance(m["alvo"], tuple)}
+    n_exist = sum(1 for m in mudancas if not isinstance(m["alvo"], tuple))
     revisadas = sorted({m["pid"] for m in mudancas if m["revisada"]})
     tk.Label(win, bg=BG, font=("Segoe UI", 10, "bold"), anchor="w", justify="left",
-             text=f"{len(mudancas)} change(s) in {n_alvos} task(s) from sheet '{aba}' of {arquivo}"
-                  f"  ({n_tarefas} saved tasks checked). Only the fields that differ are listed."
+             text=f"{arquivo} ({', '.join(abas)}) – {n_tarefas} saved tasks checked.\n"
+                  f"{n_exist} change(s) in {len(existentes)} existing task(s); {len(novas)} run(s) not in the app yet. "
+                  "Only the fields that differ are listed."
              ).pack(fill="x", padx=12, pady=(10, 2))
-    tk.Label(win, bg=BG, fg="#555555", font=("Segoe UI", 8), anchor="w", justify="left",
-             text="The sheet never erases saved values: empty cells are ignored, and '#' in MASS BEFORE marks a sample "
-                  "as not tested only if it has no measurements yet."
+    tk.Label(win, bg=BG, fg="#555555", font=("Segoe UI", 8), anchor="w", justify="left", wraplength=1000,
+             text="The sheet never erases saved values: empty cells are ignored, Position and Observations are only "
+                  "filled when empty, and '#' in MASS BEFORE (Efficiency Test) marks a sample as not tested only if it "
+                  "has no measurements yet. Visual Inspection and Cryogenic Immersion are not read from the sheet."
              ).pack(fill="x", padx=12)
     if revisadas:
         tk.Label(win, bg=BG, fg=CORES_STATUS[STATUS_INCOMPLETO][0], font=("Segoe UI", 9, "bold"), anchor="w",
-                 justify="left", wraplength=940,
+                 justify="left", wraplength=1000,
                  text="⚠ Already reviewed – applying clears the review, so they must be reviewed again: "
                       + ", ".join(revisadas)).pack(fill="x", padx=12, pady=(4, 0))
 
+    criar_var = tk.BooleanVar(value=True)
+    if novas:
+        tk.Checkbutton(win, variable=criar_var, bg=BG, activebackground=BG, font=("Segoe UI", 9, "bold"),
+                       text=f"Create {len(novas)} new task(s) for the runs that are not in the app yet "
+                            "(they stay Incomplete until batch, responsible and tests are filled)"
+                       ).pack(anchor="w", padx=12, pady=(6, 0))
+
     quadro = tk.Frame(win, bg=BG)
     quadro.pack(fill="both", expand=True, padx=12, pady=8)
-    cols = ("Sample", "Field", "Current", "New (sheet)", "Sheet row")
+    cols = ("Item", "Field", "Current", "New (sheet)", "Sheet row")
     tv = ttk.Treeview(quadro, columns=cols, show="tree headings")
     tv.heading("#0", text="Task")
-    tv.column("#0", width=330)
-    for c, w in zip(cols, (70, 170, 130, 130, 80)):
+    tv.column("#0", width=360)
+    for c, w in zip(cols, (70, 160, 140, 170, 120)):
         tv.heading(c, text=c)
         tv.column(c, width=w, anchor="center")
     tv.tag_configure("tarefa", font=("Segoe UI", 9, "bold"))
+    tv.tag_configure("nova", foreground=CORES_STATUS[STATUS_REVISAR][0], font=("Segoe UI", 9, "bold"))
     tv.tag_configure("revisada", foreground=CORES_STATUS[STATUS_INCOMPLETO][0], font=("Segoe UI", 9, "bold"))
     barra = ttk.Scrollbar(quadro, orient="vertical", command=tv.yview)
     tv.configure(yscrollcommand=barra.set)
@@ -3067,15 +3332,24 @@ def janela_mudancas_planilha(parent, mudancas, n_tarefas, arquivo, aba):
     barra.pack(side="right", fill="y")
 
     nos = {}
+    contagem = {}
     for m in mudancas:
-        if m["alvo"] not in nos:
-            titulo = (f"Task {m['alvo']} – {m['pid']}" if m["alvo"] is not None else f"Current form – {m['pid']}") \
-                     + (f"   (run {m['run']})" if m["run"] else "")
-            nos[m["alvo"]] = tv.insert("", "end", text=titulo, open=True,
-                                       tags=("revisada" if m["revisada"] else "tarefa",))
-        nome = CAMPOS_SYNC_IDENT.get(m["campo"]) or CAMPOS_SYNC_EF[m["campo"]][1]
-        tv.insert(nos[m["alvo"]], "end", text="", values=(m["amostra"] or "-", nome, m["antigo"] or "(empty)",
-                                                         m["novo"] or "(empty)", m["linha"]))
+        contagem[m["alvo"]] = contagem.get(m["alvo"], 0) + 1
+    # tarefas existentes primeiro (abertas); as novas ficam fechadas
+    for m in sorted(mudancas, key=lambda m: isinstance(m["alvo"], tuple)):
+        alvo = m["alvo"]
+        if alvo not in nos:
+            if isinstance(alvo, tuple):
+                titulo, tag = f"NEW – {m['pid']}", "nova"
+            elif alvo is None:
+                titulo, tag = f"Current form – {m['pid']}", "tarefa"
+            else:
+                titulo, tag = f"Task {alvo} – {m['pid']}", "revisada" if m["revisada"] else "tarefa"
+            nos[alvo] = tv.insert("", "end", text=f"{titulo}   ({contagem[alvo]})", open=not isinstance(alvo, tuple),
+                                  tags=(tag,))
+        item = f"Pos {m['item']}" if m["tipo"] == "massa" else (m["item"] or "-")
+        tv.insert(nos[alvo], "end", text="", values=(item, _nome_campo_sync(m), m["antigo"] or "(empty)",
+                                                     m["novo"] or "(empty)", f"{m['aba']} {m['linha']}"))
 
     botoes = tk.Frame(win, bg=BG)
     botoes.pack(fill="x", padx=12, pady=(0, 12))
@@ -3083,15 +3357,16 @@ def janela_mudancas_planilha(parent, mudancas, n_tarefas, arquivo, aba):
     lbl.pack(side="left")
 
     def aplicar():
-        aplicar_mudancas_planilha(mudancas, arquivo)
+        n, criadas = aplicar_mudancas_planilha(mudancas, arquivo, criar_var.get())
         btn_aplicar.destroy()
         btn_cancelar.config(text="Close")
-        lbl.config(text=f"✔ {len(mudancas)} change(s) applied at {datetime.now().strftime('%H:%M')}.")
-        info = widgets_ef.get("import_info")
-        if info is not None:
+        texto = f"✔ {n} change(s) applied" + (f", {criadas} new task(s) created" if criadas else "") \
+                + f" at {datetime.now().strftime('%H:%M')}."
+        lbl.config(text=texto)
+        for info in (widgets_ef.get("import_info"), lbl_sync_info):
             try:
-                info.config(fg="#2e7d32", text=f"Synced from {arquivo} ({aba}) at {datetime.now().strftime('%H:%M')}: "
-                            f"{len(mudancas)} change(s) in {n_alvos} task(s).")
+                if info is not None:
+                    info.config(fg="#2e7d32", text=f"Synced from {arquivo}: " + texto[2:])
             except tk.TclError:
                 pass
 
@@ -3103,7 +3378,7 @@ def janela_mudancas_planilha(parent, mudancas, n_tarefas, arquivo, aba):
 
 
 def importar_eficiencia_planilha(parent):
-    """Sincroniza a planilha DUNE_Control.xlsx inteira com as tarefas gravadas (massas, área e x de P02/P03/P14)."""
+    """Sincroniza a planilha DUNE_Control.xlsx inteira (abas Deposition Control e Efficiency Test) com as tarefas."""
     ultimo = ler_config("planilha_eficiencia")
     caminho = filedialog.askopenfilename(
         parent=parent, title="Select the DUNE_Control spreadsheet",
@@ -3113,7 +3388,13 @@ def importar_eficiencia_planilha(parent):
     if not caminho:
         return
     try:
-        aba, linhas = ler_planilha_eficiencia(caminho)
+        aba_dep, deps = ler_planilha_deposicao(caminho)
+        try:
+            aba_ef, linhas_ef = ler_planilha_eficiencia(caminho)
+        except ValueError:
+            if aba_dep is None:
+                raise
+            aba_ef, linhas_ef = None, []
     except ImportError:
         messagebox.showerror("Import", "The 'openpyxl' package is required.\n"
                              "Install it with:  python -m pip install openpyxl", parent=parent)
@@ -3122,14 +3403,15 @@ def importar_eficiencia_planilha(parent):
         messagebox.showerror("Import", "Could not read the spreadsheet:\n\n" + str(e), parent=parent)
         return
     gravar_config("planilha_eficiencia", caminho)
+    abas = [a for a in (aba_dep, aba_ef) if a]
 
-    mudancas, n_tarefas = mudancas_planilha(linhas)
+    mudancas, n_tarefas = mudancas_planilha(linhas_ef, deps)
     if not mudancas:
         messagebox.showinfo("Sync Leptons Control Sheet",
-                            f"Everything is up to date: no differences between sheet '{aba}' "
-                            f"({len(linhas)} sample rows) and the {n_tarefas} saved tasks.", parent=parent)
+                            f"Everything is up to date: no differences between {', '.join(abas)} "
+                            f"and the {n_tarefas} saved tasks.", parent=parent)
         return
-    janela_mudancas_planilha(parent, mudancas, n_tarefas, os.path.basename(caminho), aba)
+    janela_mudancas_planilha(parent, mudancas, n_tarefas, os.path.basename(caminho), abas)
 
 
 def abrir_eficiencia_optica():
@@ -3207,9 +3489,9 @@ def abrir_eficiencia_optica():
     ttk.Button(barra_imp, text="Sync Leptons Control Sheet",
                command=lambda: importar_eficiencia_planilha(win)).pack(side="left")
     lbl_imp = tk.Label(barra_imp, bg=BG, fg="#555555", font=("Segoe UI", 8), justify="left", wraplength=620,
-                       text="Compares the whole 'Efficiency Test' sheet with every saved task (matched by RUN, "
-                            "e.g. DUNE_EVAP_#0002#) and shows only what changed before applying. "
-                            "For a new task, type its Run here first.")
+                       text="Compares the Deposition Control and Efficiency Test tabs with every saved task "
+                            "(matched by RUN, e.g. DUNE_EVAP_#0002#) and shows only what changed before applying. "
+                            "Same as the button on the main screen.")
     lbl_imp.pack(side="left", padx=10)
     widgets_ef["import_info"] = lbl_imp
 
@@ -3729,6 +4011,7 @@ def _bloco_info(d):
         (_celula_campo("RUN EVAPORATION", c.get("run_evaporation")), _celula_campo("POSITION FILTERS", t.get("position_range"))),
         (_celula_campo("PTP MASS (g)", t.get("massa_ptp_g")), _celula_campo("INSPECTOR NAME", inspetor)),
         (_celula_campo("FILTER TYPE", t.get("descricao")), _celula_campo("RECORDED", t.get("data_hora_registro"))),
+        (_celula_campo("PTP BATCH", t.get("lote_ptp")), ""),
     ]
     tab = "".join("<tr><td>" + a + "</td><td>" + b + "</td></tr>" for a, b in linhas)
     tab += "<tr><td colspan='2'><b>BATCHES:</b><br>" + lotes_txt + "</td></tr>"
@@ -4250,6 +4533,7 @@ def gerar_pdf_relatorio(tarefa_id, caminho):
         [campo("RUN EVAPORATION", cab.get("run_evaporation")), campo("POSITION FILTERS", t.get("position_range"))],
         [campo("PTP MASS (g)", t.get("massa_ptp_g")), campo("INSPECTOR NAME (RESPONSIBLE)", inspetor)],
         [campo("FILTER TYPE", t.get("descricao")), campo("RECORDED", t.get("data_hora_registro"))],
+        [campo("PTP BATCH", t.get("lote_ptp")), ""],
         [M("<b>CHILDREN PID'S:</b> &nbsp; P02: " + txt(cab.get("pid_p02")) + " &nbsp;&nbsp; P03: " + txt(cab.get("pid_p03"))
            + " &nbsp;&nbsp; P14: " + txt(cab.get("pid_p14"))), ""],
         [campo("NOTES", t.get("observacoes")), ""],
@@ -4968,9 +5252,40 @@ lbl_relogio = tk.Label(frame_relogio, text="", fg="white", bg="#1f3a5f", font=("
 lbl_relogio.pack(anchor="e")
 inserir_logo("direita.png", 3, "e")   # logo na coluna própria; o relógio fica à esquerda dela
 
-# ---------- CONTEÚDO ----------
-frame = tk.Frame(janela, bg="#f4f6f8", padx=20, pady=10)
-frame.pack(fill="both", expand=True)
+# ---------- CONTEÚDO (rolável: em telas baixas a tabela de tarefas fica abaixo da borda) ----------
+area_conteudo = tk.Frame(janela, bg="#f4f6f8")
+area_conteudo.pack(fill="both", expand=True)
+canvas_conteudo = tk.Canvas(area_conteudo, bg="#f4f6f8", highlightthickness=0, yscrollincrement=20)
+barra_rolagem = ttk.Scrollbar(area_conteudo, orient="vertical", command=canvas_conteudo.yview)
+canvas_conteudo.configure(yscrollcommand=barra_rolagem.set)
+barra_rolagem.pack(side="right", fill="y")
+canvas_conteudo.pack(side="left", fill="both", expand=True)
+
+frame = tk.Frame(canvas_conteudo, bg="#f4f6f8", padx=20, pady=10)
+item_conteudo = canvas_conteudo.create_window(0, 0, window=frame, anchor="nw")
+canvas_conteudo.bind("<Configure>", lambda e: canvas_conteudo.itemconfigure(item_conteudo, width=e.width))
+frame.bind("<Configure>", lambda e: canvas_conteudo.configure(scrollregion=canvas_conteudo.bbox("all")))
+
+
+def rolar_conteudo(event):
+    """Roda do mouse na tela principal (tabelas e textos continuam rolando sozinhos)."""
+    w = event.widget
+    if not hasattr(w, "winfo_class") or w.winfo_class() in ("Treeview", "Text", "TCombobox", "Listbox"):
+        return
+    if frame.winfo_height() <= canvas_conteudo.winfo_height():
+        return
+    canvas_conteudo.yview_scroll(-3 if (event.num == 4 or getattr(event, "delta", 0) > 0) else 3, "units")
+
+
+for _evento in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+    janela.bind(_evento, rolar_conteudo)      # só a janela principal; as outras janelas têm a sua rolagem
+
+
+def ir_para_tarefas():
+    """Rola até a lista de tarefas gravadas e põe o cursor na busca."""
+    canvas_conteudo.update_idletasks()
+    canvas_conteudo.yview_moveto(1.0)
+    entry_busca_tarefa.focus_set()
 frame.grid_columnconfigure(1, weight=1)
 frame.grid_columnconfigure(2, weight=1)
 
@@ -5093,10 +5408,22 @@ imersao_var.trace_add("write", atualizar_resumos)
 valor_ef_var.trace_add("write", atualizar_resumos)
 atualizar_resumos()
 
+# ---------- Sincronização com a planilha DUNE_Control (Deposition Control + Efficiency Test) ----------
+tk.Button(quadro_qualidade, text="⟳  Sync Leptons Control Sheet", command=lambda: importar_eficiencia_planilha(janela),
+          bg="#5e35b1", fg="white", font=("Segoe UI", 11, "bold"), relief="flat", cursor="hand2", width=26, pady=9,
+          activebackground="#5e35b1", activeforeground="white").grid(row=6, column=0, sticky="w", pady=(10, 2))
+frame_sync = tk.Frame(quadro_qualidade, bg="#f4f6f8")
+frame_sync.grid(row=7, column=0, sticky="w", pady=(0, 6))
+lbl_sync_info = tk.Label(frame_sync, text="Updates every task from DUNE_Control.xlsx\n"
+                                          "(Deposition Control + Efficiency Test tabs)",
+                         bg="#f4f6f8", fg="#555555", font=("Segoe UI", 8), anchor="w", justify="left", wraplength=300)
+lbl_sync_info.pack(anchor="w")
+ttk.Button(frame_sync, text="☰  Browse saved tasks", command=ir_para_tarefas).pack(anchor="w", pady=(8, 0))
+
 # ---------- Final QA Sign-Off (aval final, depois de todos os testes) ----------
 quadro_signoff = tk.LabelFrame(quadro_qualidade, text="Final QA Sign-Off", bg="#f4f6f8",
                                font=("Segoe UI", 10, "bold"), padx=8, pady=6)
-quadro_signoff.grid(row=6, column=0, sticky="we", pady=(14, 0))
+quadro_signoff.grid(row=8, column=0, sticky="we", pady=(14, 0))
 tk.Label(quadro_signoff, text="Final QA Sign-Off by:", bg="#f4f6f8", font=("Segoe UI", 9, "bold")).grid(
     row=0, column=0, columnspan=3, sticky="w")
 ttk.Entry(quadro_signoff, textvariable=signoff_vars["por"], width=36, state="readonly").grid(
@@ -5110,11 +5437,11 @@ lbl_status_signoff.grid(row=3, column=0, columnspan=3, sticky="w", pady=(6, 0))
 atualizar_status_signoff()
 
 lbl_modo = tk.Label(quadro_qualidade, text="Mode: new record", bg="#f4f6f8", fg="#1f3a5f", font=("Segoe UI", 10, "bold"))
-lbl_modo.grid(row=7, column=0, sticky="w", pady=(18, 0))
+lbl_modo.grid(row=9, column=0, sticky="w", pady=(18, 0))
 
-tk.Label(quadro_qualidade, text="Current date/time:", bg="#f4f6f8", font=("Segoe UI", 10, "bold")).grid(row=8, column=0, sticky="w", pady=(14, 2))
+tk.Label(quadro_qualidade, text="Current date/time:", bg="#f4f6f8", font=("Segoe UI", 10, "bold")).grid(row=10, column=0, sticky="w", pady=(14, 2))
 lbl_relogio_tela = tk.Label(quadro_qualidade, text="", bg="#f4f6f8", fg="#333333", font=("Segoe UI", 10))
-lbl_relogio_tela.grid(row=9, column=0, sticky="w")
+lbl_relogio_tela.grid(row=11, column=0, sticky="w")
 
 def atualizar_relogio_tela():
     agora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
@@ -5164,6 +5491,9 @@ linha_ptp.pack(anchor="w", pady=(6, 0))
 entry_ptp_mass = ttk.Entry(linha_ptp, width=16)
 entry_ptp_mass.pack(side="left")
 tk.Label(linha_ptp, text="g", bg="#f4f6f8").pack(side="left", padx=(6, 0))
+tk.Label(linha_ptp, text="PTP Batch:", bg="#f4f6f8", font=("Segoe UI", 10, "bold")).pack(side="left", padx=(20, 6))
+entry_ptp_lote = ttk.Entry(linha_ptp, width=16)
+entry_ptp_lote.pack(side="left")
 tk.Label(frame_ptp_mass, text=f"Area: {AREA_FILTRO_MM2:.0f} mm² = {AREA_FILTRO_CM2:.1f} cm²", bg="#f4f6f8", fg="#555555", font=("Segoe UI", 9)).pack(anchor="w", pady=(10, 0))
 tk.Label(frame_ptp_mass, text="density = (after − before) / area", bg="#f4f6f8", fg="#555555", font=("Segoe UI", 9)).pack(anchor="w", pady=(2, 0))
 
@@ -5186,7 +5516,6 @@ ttk.Button(btn2, text="Export all PDFs", command=gerar_todos_pdfs).pack(side="le
 ttk.Button(btn2, text="Export task (JSON)", command=exportar_tarefa_json).pack(side="left", padx=8, ipadx=10)
 ttk.Button(btn2, text="Import task (JSON)", command=importar_tarefa_json).pack(side="left", padx=8, ipadx=10)
 ttk.Button(btn2, text="Backup now", command=backup_agora).pack(side="left", padx=8, ipadx=10)
-ttk.Button(btn2, text="Sync Leptons Control Sheet", command=lambda: importar_eficiencia_planilha(janela)).pack(side="left", padx=8, ipadx=10)
 ttk.Button(btn1, text="View details", command=abrir_detalhes_tarefa).pack(side="left", padx=8, ipadx=10)
 tk.Button(btn2, text="Review task", command=abrir_revisao_tarefa, bg=CORES_STATUS[STATUS_REVISAR][0], fg="white",
           font=("Segoe UI", 10, "bold"), padx=15, pady=4, relief="flat").pack(side="left", padx=8)
@@ -5212,7 +5541,7 @@ lbl_contagem_tarefas = tk.Label(frame_busca, text="", bg="#f4f6f8", fg="#555555"
 lbl_contagem_tarefas.pack(side="left", padx=12)
 
 # ---------- TABELA ----------
-cols = ("ID", "PID", "Status", "Internal Batch", "Responsible", "Deposition Date", "Visual Inspection", "Optical Efficiency", "Cryogenic Immersion")
+cols = ("ID", "PID", "Run", "Status", "Internal Batch", "Responsible", "Deposition Date", "Visual Inspection", "Optical Efficiency", "Cryogenic Immersion")
 tabela = ttk.Treeview(frame, columns=cols, show="headings", height=8)
 tabela.grid(row=4, column=0, columnspan=3, sticky="nsew", pady=(4, 10))
 
@@ -5221,6 +5550,9 @@ for c in cols:
     tabela.column(c, anchor="center", width=120)
 
 tabela.column("Internal Batch", width=240)      # lote interno (caixa menor) usado na deposição
+tabela.column("ID", width=50)
+tabela.column("PID", width=210)
+tabela.column("Run", width=150)
 for _status, (_texto, _fundo) in CORES_STATUS.items():
     tabela.tag_configure(_status, foreground=_texto, background=_fundo)
 tabela.bind("<Double-1>", lambda event: carregar_para_edicao())
