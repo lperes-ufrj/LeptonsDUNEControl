@@ -19,3 +19,6 @@ qrcodes_lotes/
 # Images with report links/tokens or real names (kept locally only)
 qr_tarefa_*.png
 arquivos antigos/pdf_exemplo.png
+
+# Exported task files (lab data)
+tarefas_json/

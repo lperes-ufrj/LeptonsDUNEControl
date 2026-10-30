@@ -15,6 +15,7 @@ import hmac
 import hashlib
 import secrets
 import html
+import json
 import base64
 import webbrowser
 import re
@@ -53,6 +54,7 @@ SERVIDOR_PORTA = 8765
 URL_BASE_RELATORIO = ""
 PASTA_RELATORIOS = "relatorios"
 PASTA_PDF = "relatorios_pdf"          # onde o botão "Print report (PDF)" grava os PDFs
+PASTA_JSON = "tarefas_json"           # onde "Export task (JSON)" grava as tarefas exportadas
 servidor_http = None
 
 # ---- Inspeção visual (Deposition Inspection Record) ----
@@ -119,7 +121,7 @@ IDADE_MAX_REFERENCIA_DIAS = 183             # vida máxima do substrato de refer
 AMOSTRAS_EFICIENCIA = ["P02", "P03", "P14"]
 CAMPOS_EF_TESTE = ["data_teste", "ref_id", "ref_data", "temp", "umid",
                    "supervisor", "data_revisao", "revisado", "obs", "operador"]
-CAMPOS_EF_AMOSTRA = ["testada", "comp", "larg", "antes", "depois", "x"]
+CAMPOS_EF_AMOSTRA = ["testada", "antes", "depois", "area", "x"]     # mesmos campos da planilha (aba Efficiency Test)
 
 ef_vars = {}
 janela_eficiencia = None
@@ -469,10 +471,10 @@ def codigos_atuais_lotes_internos():
     return internos, limpezas
 
 
-def carregar_tarefas():
-    for i in tabela.get_children():
-        tabela.delete(i)
+_linhas_tarefas = []      # cache da tabela: (valores, status, texto de busca)
 
+
+def carregar_tarefas():
     conn = conectar()
     cur = conn.cursor()
 
@@ -497,14 +499,53 @@ def carregar_tarefas():
         ORDER BY t.id DESC
     """)
 
-    for row in cur.fetchall():
+    linhas = cur.fetchall()
+
+    # run / box PID / PIDs de controle (inspeção visual) também entram na busca
+    extras_busca = {}
+    cur.execute("SELECT id_tarefa, run_evaporation, box_pid, pid_p02, pid_p03, pid_p14 FROM inspecao_visual_cab")
+    for r in cur.fetchall():
+        extras_busca[r[0]] = " ".join(str(x) for x in r[1:] if x)
+    conn.close()
+
+    _linhas_tarefas.clear()
+    for row in linhas:
         valores = list(row)
         if row[0] in codigos_por_tarefa:
             valores[2] = "; ".join(codigos_por_tarefa[row[0]])       # Internal Batch (ex.: DUNE-CX-0001)
         valores[5] = f"{row[5]}/{N_FILTROS}"
-        tabela.insert("", "end", values=valores)
+        status, _pend = atualizar_status_tarefa(row[0])            # recalcula: vale também para tarefas antigas
+        valores.insert(2, status or "-")
+        texto = " ".join(str(v) for v in valores if v is not None) + " " + str(row[2] or "") + " " + extras_busca.get(row[0], "")
+        _linhas_tarefas.append((valores, status, texto.upper().replace("_", "-")))   # _ e - valem igual (planilha mistura)
 
-    conn.close()
+    filtrar_tarefas()
+
+
+def filtrar_tarefas(*_):
+    """Mostra na tabela só as tarefas que batem com a busca e o filtro de status."""
+    for i in tabela.get_children():
+        tabela.delete(i)
+
+    termos = busca_tarefa_var.get().upper().replace("_", "-").split()
+    status_sel = filtro_status_var.get()
+    n = 0
+    for valores, status, texto in _linhas_tarefas:
+        if status_sel != "All" and status != status_sel:
+            continue
+        if any(t not in texto for t in termos):
+            continue
+        tabela.insert("", "end", values=valores, tags=(status,))
+        n += 1
+
+    total = len(_linhas_tarefas)
+    lbl_contagem_tarefas.config(text=f"{total} tasks" if n == total else f"Showing {n} of {total} tasks")
+
+
+def limpar_busca_tarefas():
+    busca_tarefa_var.set("")
+    filtro_status_var.set("All")
+    filtrar_tarefas()
 
 
 def texto_lote_combo(l):
@@ -737,14 +778,15 @@ def salvar_lotes_db(cur, tarefa_id, lotes_sel):
                     (tarefa_id, l[0], l[1], interno_id, codigo_interno, _tipo_da_entrada(l)))
 
 
-def buscar_lotes_da_tarefa(tarefa_id, lote_id_legado, codigo_legado):
+def buscar_lotes_da_tarefa(tarefa_id, lote_id_legado, codigo_legado, cur=None):
     """Lotes (e lotes internos / limpeza) gravados para a tarefa; registros antigos têm um lote só, em tarefas."""
-    conn = conectar()
-    cur = conn.cursor()
-    cur.execute("SELECT lote_id, codigo_lote, lote_interno_id, codigo_lote_interno, tipo_lote "
-                "FROM tarefa_lotes WHERE id_tarefa = ? ORDER BY id", (tarefa_id,))
-    salvos = cur.fetchall()
-    conn.close()
+    conn = conectar() if cur is None else None
+    c = cur if cur is not None else conn.cursor()
+    c.execute("SELECT lote_id, codigo_lote, lote_interno_id, codigo_lote_interno, tipo_lote "
+              "FROM tarefa_lotes WHERE id_tarefa = ? ORDER BY id", (tarefa_id,))
+    salvos = c.fetchall()
+    if conn is not None:
+        conn.close()
 
     if not salvos and (lote_id_legado is not None or codigo_legado):
         salvos = [(lote_id_legado, codigo_legado, None, None, "opto")]
@@ -1176,7 +1218,7 @@ def salvar_tarefa():
          eficiencia_optica_ok, valor_eficiencia, imersao_criogenica_ok, data_hora_registro, massa_ptp_g)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        dados["serial"], dados["resp"], dados["data"], "Cadastrada", dados["tipo"],
+        dados["serial"], dados["resp"], dados["data"], STATUS_INCOMPLETO, dados["tipo"],
         dados["lote_id"], dados["codigo_lote"], dados["posicao"], dados["obs"], dados["anexos_txt"],
         dados["eficiencia_ok"], dados["valor_eficiencia"], dados["imersao_ok"], dados["data_hora_registro"],
         dados["massa_ptp_g"]
@@ -1199,14 +1241,15 @@ def salvar_tarefa():
     conn.commit()
     conn.close()
 
-    leptons_auth.registrar("TASK_CREATE", f"id={tarefa_id} PID={dados['serial']}")
-    messagebox.showinfo("Sucesso", "Tarefa cadastrada!")
+    status, pend = atualizar_status_tarefa(tarefa_id)
+    leptons_auth.registrar("TASK_CREATE", f"id={tarefa_id} PID={dados['serial']} status={status}")
+    messagebox.showinfo("Saved", "Task saved.\n\n" + texto_status_salvo(status, pend))
     limpar_campos()
     carregar_tarefas()
 
 
 def carregar_para_edicao():
-    global tarefa_em_edicao_id, anexos_lista
+    global tarefa_em_edicao_id
 
     item = tabela.selection()
     if not item:
@@ -1216,7 +1259,23 @@ def carregar_para_edicao():
     tarefa_id = tabela.item(item[0], "values")[0]
 
     conn = conectar()
-    cur = conn.cursor()
+    try:
+        achou = preencher_formulario(conn.cursor(), tarefa_id)
+    finally:
+        conn.close()
+    if not achou:
+        messagebox.showerror("Erro", "Registro não encontrado.")
+        return
+    tarefa_em_edicao_id = tarefa_id
+    lbl_modo["text"] = f"Mode: editing ID {tarefa_id}"
+
+
+def preencher_formulario(cur, tarefa_id):
+    """Preenche a tela com a tarefa lida pelo cursor (banco real ou cópia em memória vinda de um .json).
+
+    Retorna False se a tarefa não existir. Deixa a tela no modo 'novo registro'."""
+    global anexos_lista
+
     cur.execute("""
         SELECT codigo_tarefa, responsavel, data_inicio, descricao,
                lote_entrada_id, codigo_lote, position_range, observacoes,
@@ -1229,26 +1288,21 @@ def carregar_para_edicao():
 
     cur.execute("SELECT posicao, massa_antes, massa_depois, densidade_massa_ug_cm2 FROM massa_posicoes WHERE id_tarefa = ?", (tarefa_id,))
     massas = {p: (a, d, dens) for p, a, d, dens in cur.fetchall()}
-    conn.close()
 
     if not row:
-        messagebox.showerror("Erro", "Registro não encontrado.")
-        return
+        return False
 
     limpar_campos()
-    tarefa_em_edicao_id = tarefa_id
 
-    conn_i = conectar()
-    carregar_inspecao_db(conn_i.cursor(), tarefa_id)
-    carregar_imersao_db(conn_i.cursor(), tarefa_id)
-    carregar_eficiencia_db(conn_i.cursor(), tarefa_id)
-    carregar_signoff_db(conn_i.cursor(), tarefa_id)
-    conn_i.close()
+    carregar_inspecao_db(cur, tarefa_id)
+    carregar_imersao_db(cur, tarefa_id)
+    carregar_eficiencia_db(cur, tarefa_id)
+    carregar_signoff_db(cur, tarefa_id)
 
     serial, resp, data, tipo, lote_id, codigo_lote, posicao, obs, anexos_txt, ef_ok, val_ef, im_ok, massa_ptp = row
 
     atualizar_lotes()
-    definir_lotes_selecionados(buscar_lotes_da_tarefa(tarefa_id, lote_id, codigo_lote))
+    definir_lotes_selecionados(buscar_lotes_da_tarefa(tarefa_id, lote_id, codigo_lote, cur))
 
     inspecao_vars["cab"]["box_pid"].set(serial or "")
     entry_data.delete(0, tk.END)
@@ -1278,7 +1332,7 @@ def carregar_para_edicao():
 
     anexos_lista = anexos_txt.split(";") if anexos_txt else []
     lbl_anexos["text"] = f"{len(anexos_lista)} arquivo(s) anexado(s)" if anexos_lista else "No files"
-    lbl_modo["text"] = f"Mode: editing ID {tarefa_id}"
+    return True
 
 
 def editar_tarefa():
@@ -1291,6 +1345,21 @@ def editar_tarefa():
     dados = validar_campos()
     if dados is None:
         return
+
+    # tarefa já revisada: qualquer alteração exige uma nova revisão
+    conn = conectar()
+    revisada = conn.execute("SELECT qa_signoff_por, qa_signoff_data FROM tarefas WHERE id = ?",
+                            (tarefa_em_edicao_id,)).fetchone()
+    conn.close()
+    if revisada and (revisada[0] or "").strip():
+        if not messagebox.askyesno(
+                "Edit / Update",
+                f"This task was reviewed by {revisada[0]} on {revisada[1] or '-'}.\n\n"
+                "Saving changes removes the review and sends the task back to 'To be reviewed'. Continue?"):
+            return
+        limpar_signoff()
+        leptons_auth.registrar("TASK_REVIEW_CLEARED", f"id={tarefa_em_edicao_id} PID={dados['serial']} "
+                               f"(was reviewed by {revisada[0]} on {revisada[1]})")
 
     conn = conectar()
     cur = conn.cursor()
@@ -1326,10 +1395,176 @@ def editar_tarefa():
     conn.commit()
     conn.close()
 
-    leptons_auth.registrar("TASK_UPDATE", f"id={tarefa_em_edicao_id} PID={dados['serial']}")
-    messagebox.showinfo("Sucesso", "Registro atualizado!")
+    status, pend = atualizar_status_tarefa(tarefa_em_edicao_id)
+    leptons_auth.registrar("TASK_UPDATE", f"id={tarefa_em_edicao_id} PID={dados['serial']} status={status}")
+    messagebox.showinfo("Saved", "Task updated.\n\n" + texto_status_salvo(status, pend))
     limpar_campos()
     carregar_tarefas()
+
+
+# =====================================================
+# EXPORTAR / IMPORTAR TAREFA (.json)
+# =====================================================
+FORMATO_JSON = "leptons-deposition-task"
+# tabelas ligadas à tarefa por id_tarefa (a linha da própria tarefa fica em "task")
+TABELAS_TAREFA = ["tarefa_lotes", "massa_posicoes", "inspecao_visual_cab", "inspecao_visual_filtros",
+                  "imersao_massas", "imersao_itens", "eficiencia_teste", "eficiencia_amostras"]
+
+
+def exportar_tarefa_json():
+    """Grava tudo o que o banco tem da tarefa selecionada em um arquivo .json (pode ser importado de volta)."""
+    tarefa_id = _tarefa_selecionada()
+    if tarefa_id is None:
+        return
+
+    conn = conectar()
+    conn.row_factory = sqlite3.Row
+    try:
+        t = conn.execute("SELECT * FROM tarefas WHERE id = ?", (tarefa_id,)).fetchone()
+        if t is None:
+            messagebox.showwarning("Export", "Task not found in the database.")
+            return
+        dados = {
+            "format": FORMATO_JSON,
+            "version": 1,
+            "pid": t["codigo_tarefa"],
+            "exported_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "exported_by": leptons_auth.nome_responsavel(),
+            "source_task_id": tarefa_id,
+            "task": {k: t[k] for k in t.keys() if k != "id"},
+            "tables": {
+                tab: [{k: r[k] for k in r.keys() if k not in ("id", "id_tarefa")}
+                      for r in conn.execute(f"SELECT * FROM {tab} WHERE id_tarefa = ? ORDER BY id", (tarefa_id,))]
+                for tab in TABELAS_TAREFA
+            },
+        }
+    finally:
+        conn.close()
+
+    pid = re.sub(r"[^A-Za-z0-9_.-]", "_", str(t["codigo_tarefa"] or "task"))
+    os.makedirs(PASTA_JSON, exist_ok=True)
+    caminho = filedialog.asksaveasfilename(
+        title="Export task to JSON", initialdir=os.path.abspath(PASTA_JSON),
+        initialfile=f"Task_{pid}_task{tarefa_id}.json", defaultextension=".json",
+        filetypes=[("JSON", "*.json"), ("All files", "*.*")])
+    if not caminho:
+        return
+    try:
+        with open(caminho, "w", encoding="utf-8") as f:
+            json.dump(dados, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        messagebox.showerror("Export", "Could not write the file:\n" + str(e))
+        return
+    leptons_auth.registrar("TASK_EXPORT_JSON", f"id={tarefa_id} PID={t['codigo_tarefa']} file={os.path.basename(caminho)}")
+    messagebox.showinfo("Export", "Task saved at:\n" + os.path.abspath(caminho))
+
+
+def _lotes_ausentes(linhas_lotes):
+    """Códigos de lotes do arquivo que não existem no cadastro de lotes deste computador."""
+    atualizar_lotes()
+    ausentes = []
+    for l in linhas_lotes:
+        codigo, interno = l.get("codigo_lote"), l.get("codigo_lote_interno")
+        if l.get("tipo_lote") == "limpeza":
+            if interno and buscar_lote_limpeza(None, interno) is None:
+                ausentes.append(interno)
+            continue
+        if codigo and not any(x[1] == codigo for x in lotes):
+            ausentes.append(codigo)
+        if interno and buscar_lote_interno(None, interno) is None:
+            ausentes.append(interno)
+    return ausentes
+
+
+def importar_tarefa_json():
+    """Carrega uma tarefa exportada (.json) na tela para revisão; o usuário grava com Save ou Edit / Update."""
+    global tarefa_em_edicao_id
+
+    caminho = filedialog.askopenfilename(
+        title="Import task from JSON",
+        initialdir=os.path.abspath(PASTA_JSON) if os.path.isdir(PASTA_JSON) else os.getcwd(),
+        filetypes=[("JSON", "*.json"), ("All files", "*.*")])
+    if not caminho:
+        return
+    try:
+        with open(caminho, encoding="utf-8") as f:
+            dados = json.load(f)
+        if not isinstance(dados, dict) or dados.get("format") != FORMATO_JSON or not isinstance(dados.get("task"), dict):
+            raise ValueError("This file is not a task exported by the Deposition Control System.")
+    except Exception as e:
+        messagebox.showerror("Import", "Could not read the file:\n\n" + str(e))
+        return
+
+    tabelas = dados.get("tables") or {}
+    pid = str(dados["task"].get("codigo_tarefa") or "").strip()
+    conn = conectar()
+    try:
+        existentes = [r[0] for r in conn.execute("SELECT id FROM tarefas WHERE codigo_tarefa = ? ORDER BY id", (pid,))] if pid else []
+        esquema = dict(conn.execute("SELECT name, sql FROM sqlite_master WHERE type = 'table'").fetchall())
+    finally:
+        conn.close()
+
+    destino = None
+    if existentes:
+        # a tarefa de onde o arquivo saiu (se tiver o mesmo PID); senão, a mais recente com esse PID
+        alvo = dados.get("source_task_id") if dados.get("source_task_id") in existentes else existentes[-1]
+        resposta = messagebox.askyesnocancel(
+            "Import task",
+            f"A task with PID {pid} already exists (ID {', '.join(map(str, existentes))}).\n\n"
+            f"Yes = load the file over task ID {alvo} (review, then Edit / Update)\n"
+            "No = load it as a new task (review, then Save)\n"
+            "Cancel = do nothing")
+        if resposta is None:
+            return
+        destino = alvo if resposta else None
+
+    # cópia em memória com o mesmo formato do banco: a tela é preenchida pelo mesmo código do "Load for edit"
+    mem = sqlite3.connect(":memory:")
+    try:
+        def inserir(tab, linha):
+            colunas = [c[1] for c in mem.execute(f"PRAGMA table_info({tab})")]
+            linha = {k: v for k, v in linha.items() if k in colunas and k != "id"}
+            if linha:
+                mem.execute(f"INSERT INTO {tab} ({', '.join(linha)}) VALUES ({', '.join('?' * len(linha))})",
+                            tuple(linha.values()))
+            else:
+                mem.execute(f"INSERT INTO {tab} DEFAULT VALUES")
+
+        for tab in ["tarefas"] + TABELAS_TAREFA:
+            mem.execute(esquema[tab])
+        inserir("tarefas", dict(dados["task"], lote_entrada_id=None))
+        for tab in TABELAS_TAREFA:
+            for linha in tabelas.get(tab) or []:
+                linha = dict(linha, id_tarefa=1)
+                if tab == "tarefa_lotes":       # os IDs mudam entre computadores: os lotes são achados pelos códigos
+                    linha.update(lote_id=None, lote_interno_id=None)
+                inserir(tab, linha)
+        achou = preencher_formulario(mem.cursor(), 1)
+    except Exception as e:
+        messagebox.showerror("Import", "Could not load the task from the file:\n\n" + str(e))
+        return
+    finally:
+        mem.close()
+    if not achou:
+        messagebox.showerror("Import", "The file has no task data.")
+        return
+
+    tarefa_em_edicao_id = destino
+    nome = os.path.basename(caminho)
+    if destino is None:
+        lbl_modo["text"] = f"Mode: new record (imported from {nome}) – click Save"
+    else:
+        lbl_modo["text"] = f"Mode: editing ID {destino} (imported from {nome}) – click Edit / Update"
+    leptons_auth.registrar("TASK_IMPORT_JSON", f"PID={pid} file={nome} into={'new' if destino is None else 'id=' + str(destino)}")
+
+    aviso = ""
+    ausentes = _lotes_ausentes(tabelas.get("tarefa_lotes") or [])
+    if ausentes:
+        aviso = ("\n\nThese batches are not registered on this computer (they are kept with their codes):\n"
+                 + ", ".join(dict.fromkeys(ausentes)))
+    messagebox.showinfo("Import", f"Task {pid or '-'} loaded from {nome}.\n\nReview the data, then click "
+                        + ("Save to create it." if destino is None else f"Edit / Update to overwrite task ID {destino}.")
+                        + aviso)
 
 
 def excluir_tarefa():
@@ -2206,7 +2441,7 @@ def criar_variaveis_eficiencia():
     ef_vars["amostras"] = {}
     for amostra in AMOSTRAS_EFICIENCIA:
         v = {c: tk.StringVar(master=janela, value="") for c in CAMPOS_EF_AMOSTRA}
-        v["area"] = tk.StringVar(master=janela, value="-")
+        v["dif"] = tk.StringVar(master=janela, value="-")      # massa depois - massa antes (g)
         v["dens"] = tk.StringVar(master=janela, value="-")
         v["cond"] = tk.StringVar(master=janela, value="-")
         ef_vars["amostras"][amostra] = v
@@ -2332,6 +2567,7 @@ def _pintar_eficiencia():
             except tk.TclError:
                 pass
 
+
     lbl = widgets_ef.get("ref_aviso")
     if lbl is not None:
         texto, cor = texto_idade_referencia()
@@ -2358,7 +2594,7 @@ def _pintar_eficiencia():
 
 
 def recalcular_eficiencia(*args):
-    """Recalcula área, densidade de massa e condição de cada amostra, e o resultado geral."""
+    """Recalcula diferença de massa, densidade de massa e condição de cada amostra, e o resultado geral."""
     if not ef_vars:
         return
 
@@ -2371,19 +2607,17 @@ def recalcular_eficiencia(*args):
             v["testada"].set("Yes")
 
         try:
-            area = converter_float(v["comp"].get()) * converter_float(v["larg"].get()) / 100.0   # mm² -> cm²
-            if area <= 0:
-                raise ValueError("área inválida")
-            v["area"].set(f"{area:.2f}")
+            dif = converter_float(v["depois"].get()) - converter_float(v["antes"].get())
+            v["dif"].set(f"{dif:.5f}")
         except Exception:
-            area = None
-            v["area"].set("-")
+            dif = None
+            v["dif"].set("-")
 
         try:
-            if area is None:
-                raise ValueError("sem área")
-            dens = (converter_float(v["depois"].get()) - converter_float(v["antes"].get())) * 1_000_000.0 / area
-            v["dens"].set(f"{dens:.2f}")
+            area = converter_float(v["area"].get())      # cm², como na planilha
+            if dif is None or area <= 0:
+                raise ValueError("sem diferença de massa ou área")
+            v["dens"].set(f"{dif * 1_000_000.0 / area:.2f}")
         except Exception:
             v["dens"].set("-")
 
@@ -2422,7 +2656,6 @@ def salvar_eficiencia_db(cur, tarefa_id):
 
     for amostra in AMOSTRAS_EFICIENCIA:
         v = ef_vars["amostras"][amostra]
-        area = "" if v["area"].get() == "-" else v["area"].get()
         dens = "" if v["dens"].get() == "-" else v["dens"].get()
         aprovado = {"Approved": "Yes", "Rejected": "No"}.get(v["cond"].get(), "")
         cur.execute("""
@@ -2431,9 +2664,9 @@ def salvar_eficiencia_db(cur, tarefa_id):
              area_cm2, densidade_ug_cm2, eficiencia, aprovado)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (tarefa_id, amostra, v["testada"].get(),
-              v["comp"].get().strip(), v["larg"].get().strip(),
+              "", "",
               v["antes"].get().strip(), v["depois"].get().strip(),
-              area, dens,
+              v["area"].get().strip(), dens,
               v["x"].get().strip(),
               aprovado))
 
@@ -2452,14 +2685,35 @@ def carregar_eficiencia_db(cur, tarefa_id):
             ef_vars["teste"][k].set(valor or "")
 
     cur.execute("""
-        SELECT amostra, testada, comprimento_mm, largura_mm, massa_antes, massa_depois,
-               eficiencia
+        SELECT amostra, testada, massa_antes, massa_depois, area_cm2, eficiencia, comprimento_mm, largura_mm
         FROM eficiencia_amostras WHERE id_tarefa = ?
     """, (tarefa_id,))
     for row in cur.fetchall():
         if row[0] in ef_vars["amostras"]:
-            for c, valor in zip(CAMPOS_EF_AMOSTRA, row[1:]):
-                ef_vars["amostras"][row[0]][c].set(valor or "")
+            r = dict(zip(["amostra"] + CAMPOS_EF_AMOSTRA + ["comprimento_mm", "largura_mm"], row))
+            r["area"] = area_amostra_ef({"area_cm2": r["area"], "comprimento_mm": r["comprimento_mm"],
+                                         "largura_mm": r["largura_mm"]})
+            for c in CAMPOS_EF_AMOSTRA:
+                ef_vars["amostras"][row[0]][c].set(r[c] or "")
+
+
+def area_amostra_ef(r):
+    """Área (cm²) gravada da amostra; registros antigos sem área usam comprimento x largura (mm)."""
+    area = str(r.get("area_cm2") or "").strip()
+    if area:
+        return area
+    try:
+        return format(converter_float(r.get("comprimento_mm")) * converter_float(r.get("largura_mm")) / 100.0, ".2f")
+    except Exception:
+        return ""
+
+
+def diferenca_massas_ef(r):
+    """Massa depois - massa antes (g) de uma amostra gravada; '' se faltar algum valor."""
+    try:
+        return format(converter_float(r.get("massa_depois")) - converter_float(r.get("massa_antes")), ".5f")
+    except Exception:
+        return ""
 
 
 def fechar_janela_eficiencia(salvar_obs=True):
@@ -2475,6 +2729,407 @@ def fechar_janela_eficiencia(salvar_obs=True):
     janela_eficiencia = None
     txt_obs_eficiencia = None
     widgets_ef.clear()
+
+
+# ---- Importação da planilha DUNE_Control.xlsx (aba "Efficiency Test") ----
+COLUNAS_PLANILHA_EF = {        # chave -> início do título da coluna na planilha
+    "run": "RUN",
+    "box": "BOX PID",
+    "posicao": "POSITION",
+    "ctrl": "CONTROL FILTER PID",
+    "antes": "MASS BEFORE",
+    "depois": "MASS AFTER",
+    "area": "AREA",
+    "x": "RELATIVE EFFICIENCY",
+}
+
+
+def ler_config(chave):
+    conn = conectar()
+    try:
+        row = conn.execute("SELECT valor FROM config_sistema WHERE chave = ?", (chave,)).fetchone()
+        return row[0] if row else ""
+    finally:
+        conn.close()
+
+
+def gravar_config(chave, valor):
+    conn = conectar()
+    try:
+        conn.execute("INSERT OR REPLACE INTO config_sistema (chave, valor) VALUES (?, ?)", (chave, valor))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _norm_pid(texto):
+    """Compara PIDs ignorando maiúsculas, espaços e '_' no lugar de '-' (a planilha usa os dois)."""
+    return re.sub(r"\s+", "", str(texto or "")).upper().replace("_", "-")
+
+
+def _celula_planilha(valor):
+    """Valor da célula como texto; vazio para célula em branco, '#'/'###' (não testada) e erros (#VALUE!)."""
+    if valor is None:
+        return ""
+    if isinstance(valor, (int, float)):
+        return format(valor, ".10g")
+    texto = str(valor).strip()
+    return "" if texto.startswith("#") else texto
+
+
+def ler_planilha_eficiencia(caminho):
+    """Lê a aba de eficiência da planilha DUNE_Control. Retorna (nome da aba, linhas das amostras)."""
+    from openpyxl import load_workbook
+    wb = load_workbook(caminho, data_only=True, read_only=True)
+    try:
+        aba = next((ws for ws in wb.worksheets if "efficiency" in ws.title.lower()), None)
+        if aba is None:
+            raise ValueError("The spreadsheet has no 'Efficiency Test' sheet.")
+        colunas = None
+        linhas = []
+        run = box = ""
+        for n, row in enumerate(aba.iter_rows(values_only=True), start=1):
+            if colunas is None:       # procura a linha de títulos
+                titulos = [str(c or "").strip().upper() for c in row]
+                achadas = {}
+                for chave, inicio in COLUNAS_PLANILHA_EF.items():
+                    i = next((i for i, t in enumerate(titulos) if t.startswith(inicio)), None)
+                    if i is not None:
+                        achadas[chave] = i
+                if "ctrl" in achadas and "x" in achadas:
+                    colunas = achadas
+                continue
+
+            def val(chave):
+                i = colunas.get(chave)
+                return row[i] if i is not None and i < len(row) else None
+
+            # RUN e BOX PID ficam em células mescladas: só a primeira linha de cada evaporação tem o valor
+            if _celula_planilha(val("run")):
+                run = str(val("run")).strip()
+            if _celula_planilha(val("box")):
+                box = str(val("box")).strip()
+            ctrl = str(val("ctrl") or "").strip()
+            m = re.search(r"P\s*(02|03|14)\b", (str(val("posicao") or "") + " " + ctrl).upper())
+            if not ctrl and not m:
+                continue
+            antes_bruto = val("antes")
+            linhas.append({
+                "linha": n, "run": run, "box": box, "ctrl": ctrl, "amostra": "P" + m.group(1) if m else "",
+                "antes": _celula_planilha(antes_bruto), "depois": _celula_planilha(val("depois")),
+                "area": _celula_planilha(val("area")), "x": _celula_planilha(val("x")),
+                "nao_testada": isinstance(antes_bruto, str) and antes_bruto.strip().startswith("#"),
+            })
+        if colunas is None:
+            raise ValueError(f"Header row not found in sheet '{aba.title}' "
+                             "(expected columns 'CONTROL FILTER PID' and 'RELATIVE EFFICIENCY').")
+        return aba.title, linhas
+    finally:
+        wb.close()
+
+
+def linhas_da_tarefa(linhas, run, box_pid, pids):
+    """Linha da planilha de cada amostra: pelo RUN (ex.: DUNE_EVAP_#0002#) + posição; senão, pelo PID da
+    amostra de controle; senão, pelo BOX PID + posição."""
+    achadas = {}
+    for amostra in AMOSTRAS_EFICIENCIA:
+        r = None
+        if _norm_pid(run):
+            r = next((l for l in linhas
+                      if _norm_pid(l["run"]) == _norm_pid(run) and l["amostra"] == amostra), None)
+        pid = _norm_pid(pids.get(amostra))
+        if r is None and pid:
+            r = next((l for l in linhas if _norm_pid(l["ctrl"]) == pid), None)
+        if r is None and _norm_pid(box_pid):
+            r = next((l for l in linhas
+                      if _norm_pid(l["box"]) == _norm_pid(box_pid) and l["amostra"] == amostra), None)
+        if r is not None:
+            achadas[amostra] = r
+    return achadas
+
+
+# campo do formulário -> (coluna em eficiencia_amostras, nome mostrado)
+CAMPOS_SYNC_EF = {"testada": ("testada", "Tested?"), "antes": ("massa_antes", "Mass before (g)"),
+                  "depois": ("massa_depois", "Mass after (g)"), "area": ("area_cm2", "Area (cm²)"),
+                  "x": ("eficiencia", "Relative efficiency (x)")}
+# identificação da inspeção visual preenchida pela planilha quando estiver vazia
+CAMPOS_SYNC_IDENT = {"run_evaporation": "Run", "box_pid": "PID", "pid_p02": "P02 PID", "pid_p03": "P03 PID",
+                     "pid_p14": "P14 PID"}
+
+
+def _mesmo_valor(a, b):
+    a, b = str(a or "").strip(), str(b or "").strip()
+    if a == b:
+        return True
+    try:
+        return abs(converter_float(a) - converter_float(b)) < 1e-9
+    except Exception:
+        return False
+
+
+def valores_planilha_amostra(l, atual):
+    """Valores de uma amostra na planilha. A planilha nunca apaga o que já foi gravado: célula vazia é ignorada e
+    '#' em MASS BEFORE (amostra não testada) só marca Tested? = No se a amostra ainda não tem medidas."""
+    if l["nao_testada"]:
+        medida = any(str(atual.get(k) or "").strip() for k in ("antes", "depois", "area", "x"))
+        return {} if medida else {"testada": "No"}
+    novos = {k: l[k] for k in ("antes", "depois", "area", "x") if l[k]}
+    if novos:
+        novos["testada"] = "Yes"
+    return novos
+
+
+def _mudancas_alvo(alvo, pid, run, ident_atual, atuais, linhas, revisada=False):
+    """Diferenças entre a planilha e uma tarefa (alvo = id) ou o formulário (alvo = None)."""
+    pids = {a: ident_atual.get("pid_" + a.lower(), "") for a in AMOSTRAS_EFICIENCIA}
+    achadas = linhas_da_tarefa(linhas, run, ident_atual.get("box_pid", ""), pids)
+    mudancas = []
+    base = {"alvo": alvo, "pid": pid, "run": run, "revisada": revisada}
+    for amostra in AMOSTRAS_EFICIENCIA:
+        l = achadas.get(amostra)
+        if l is None:
+            continue
+        atual = atuais.get(amostra, {})
+        for campo, novo in valores_planilha_amostra(l, atual).items():
+            antigo = atual.get(campo, "")
+            if not _mesmo_valor(antigo, novo):
+                mudancas.append(dict(base, amostra=amostra, campo=campo, antigo=antigo, novo=novo, linha=l["linha"]))
+    if achadas:
+        primeira = next(iter(achadas.values()))
+        novos_ident = {"run_evaporation": primeira["run"], "box_pid": primeira["box"]}
+        for amostra, l in achadas.items():
+            novos_ident["pid_" + amostra.lower()] = l["ctrl"]
+        for campo, novo in novos_ident.items():
+            if novo and not ident_atual.get(campo, "").strip():
+                mudancas.append(dict(base, amostra="", campo=campo, antigo="", novo=novo, linha=primeira["linha"]))
+    return mudancas
+
+
+def mudancas_planilha(linhas):
+    """Compara a planilha com todas as tarefas gravadas e com o formulário (se for uma tarefa nova)."""
+    mudancas = []
+    conn = conectar()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT t.id, t.codigo_tarefa, COALESCE(t.qa_signoff_por, ''),
+               c.run_evaporation, c.box_pid, c.pid_p02, c.pid_p03, c.pid_p14
+        FROM tarefas t JOIN inspecao_visual_cab c ON c.id_tarefa = t.id
+        ORDER BY t.id
+    """)
+    tarefas = cur.fetchall()
+    for tid, pid, signoff, *ident in tarefas:
+        ident_atual = {k: (v or "") for k, v in zip(CAMPOS_SYNC_IDENT, ident)}
+        cur.execute("""
+            SELECT amostra, testada, massa_antes, massa_depois, area_cm2, eficiencia, comprimento_mm, largura_mm
+            FROM eficiencia_amostras WHERE id_tarefa = ?
+        """, (tid,))
+        atuais = {}
+        for amostra, testada, antes, depois, area, x, comp, larg in cur.fetchall():
+            atuais[amostra] = {"testada": testada or "", "antes": antes or "", "depois": depois or "",
+                               "area": area_amostra_ef({"area_cm2": area, "comprimento_mm": comp,
+                                                        "largura_mm": larg}), "x": x or ""}
+        mudancas += _mudancas_alvo(tid, pid, ident_atual["run_evaporation"], ident_atual, atuais, linhas,
+                                   bool(signoff.strip()))
+    conn.close()
+
+    if tarefa_em_edicao_id is None:      # tarefa nova, ainda não gravada: compara com o formulário
+        cab = inspecao_vars["cab"]
+        ident_atual = {k: cab[k].get().strip() for k in CAMPOS_SYNC_IDENT}
+        if any(ident_atual.values()):
+            atuais = {a: {c: ef_vars["amostras"][a][c].get().strip() for c in CAMPOS_SYNC_EF}
+                      for a in AMOSTRAS_EFICIENCIA}
+            mudancas += _mudancas_alvo(None, ident_atual["box_pid"] or "(new task, not saved)",
+                                       ident_atual["run_evaporation"], ident_atual, atuais, linhas)
+    return mudancas, len(tarefas)
+
+
+def _recalcular_amostras_db(cur, tarefa_id):
+    """Densidade e aprovação gravadas de cada amostra, a partir das massas, área e x."""
+    cur.execute("""SELECT id, testada, massa_antes, massa_depois, area_cm2, comprimento_mm, largura_mm, eficiencia
+                   FROM eficiencia_amostras WHERE id_tarefa = ?""", (tarefa_id,))
+    for rid, testada, antes, depois, area, comp, larg, x in cur.fetchall():
+        r = {"massa_antes": antes, "massa_depois": depois, "area_cm2": area, "comprimento_mm": comp,
+             "largura_mm": larg}
+        try:
+            dens = format(converter_float(diferenca_massas_ef(r)) * 1_000_000.0 / converter_float(area_amostra_ef(r)), ".2f")
+        except Exception:
+            dens = ""
+        try:
+            aprovado = ("Yes" if round(converter_float(x), 6) >= LIMITE_EFICIENCIA else "No") if testada == "Yes" else ""
+        except Exception:
+            aprovado = ""
+        cur.execute("UPDATE eficiencia_amostras SET densidade_ug_cm2 = ?, aprovado = ? WHERE id = ?",
+                    (dens, aprovado, rid))
+
+
+def aplicar_mudancas_planilha(mudancas, arquivo):
+    """Grava as mudanças nas tarefas e no formulário aberto."""
+    por_tarefa = {}
+    for m in mudancas:
+        por_tarefa.setdefault(m["alvo"], []).append(m)
+
+    conn = conectar()
+    cur = conn.cursor()
+    for tid, lista in por_tarefa.items():
+        if tid is None:
+            continue
+        for m in lista:
+            if m["campo"] in CAMPOS_SYNC_IDENT:
+                cur.execute(f"UPDATE inspecao_visual_cab SET {m['campo']} = ? WHERE id_tarefa = ?", (m["novo"], tid))
+                continue
+            coluna = CAMPOS_SYNC_EF[m["campo"]][0]
+            cur.execute("SELECT id FROM eficiencia_amostras WHERE id_tarefa = ? AND amostra = ?", (tid, m["amostra"]))
+            if cur.fetchone() is None:
+                cur.execute("""INSERT INTO eficiencia_amostras
+                               (id_tarefa, amostra, testada, comprimento_mm, largura_mm, massa_antes, massa_depois,
+                                area_cm2, densidade_ug_cm2, eficiencia, aprovado)
+                               VALUES (?, ?, '', '', '', '', '', '', '', '', '')""", (tid, m["amostra"]))
+            cur.execute(f"UPDATE eficiencia_amostras SET {coluna} = ? WHERE id_tarefa = ? AND amostra = ?",
+                        (m["novo"], tid, m["amostra"]))
+        _recalcular_amostras_db(cur, tid)
+        if lista[0]["revisada"]:          # dados mudaram: a revisão anterior deixa de valer
+            cur.execute("UPDATE tarefas SET qa_signoff_por = '', qa_signoff_data = '' WHERE id = ?", (tid,))
+    conn.commit()
+    conn.close()
+
+    # resumo da eficiência na tabela de tarefas e situação (Incomplete / To be reviewed)
+    for tid in (t for t in por_tarefa if t is not None):
+        d = coletar_dados_relatorio(tid)
+        if d is None:
+            continue
+        ok = "Sim" if estado_eficiencia_dados(d) == "approved" else "Não"
+        valor = "; ".join(f"{a}: {r.get('eficiencia')}" for a, r in d["ef_amostras"].items()
+                          if r.get("testada") == "Yes" and (r.get("eficiencia") or "").strip())
+        conn = conectar()
+        conn.execute("UPDATE tarefas SET eficiencia_optica_ok = ?, valor_eficiencia = ? WHERE id = ?", (ok, valor, tid))
+        conn.commit()
+        conn.close()
+        atualizar_status_tarefa(tid)
+
+    # formulário: tarefa nova, ou a tarefa gravada que está aberta para edição
+    # (tarefa_em_edicao_id vem da tabela como texto)
+    editada = next((t for t in por_tarefa if t is not None and str(t) == str(tarefa_em_edicao_id)), None)
+    for m in por_tarefa.get(None, []) + por_tarefa.get(editada, []):
+        if m["campo"] in CAMPOS_SYNC_IDENT:
+            inspecao_vars["cab"][m["campo"]].set(m["novo"])
+        else:
+            ef_vars["amostras"][m["amostra"]][m["campo"]].set(m["novo"])
+    if editada is not None and por_tarefa[editada][0]["revisada"]:
+        limpar_signoff()
+    atualizar_resumos()
+
+    for tid, lista in por_tarefa.items():
+        leptons_auth.registrar("EFFICIENCY_SYNC", f"id={tid if tid is not None else 'form'} PID={lista[0]['pid']} "
+                               f"file={arquivo} changes={len(lista)}"
+                               + (" review_cleared" if lista[0]["revisada"] else ""))
+    carregar_tarefas()
+
+
+def janela_mudancas_planilha(parent, mudancas, n_tarefas, arquivo, aba):
+    """Mostra só o que a planilha vai mudar; grava ao clicar em Apply."""
+    win = tk.Toplevel(parent)
+    win.title("Sync Leptons Control Sheet – changes")
+    win.geometry("980x520")
+    win.transient(parent)
+    BG = "#f4f6f8"
+    win.configure(bg=BG)
+
+    n_alvos = len({m["alvo"] for m in mudancas})
+    revisadas = sorted({m["pid"] for m in mudancas if m["revisada"]})
+    tk.Label(win, bg=BG, font=("Segoe UI", 10, "bold"), anchor="w", justify="left",
+             text=f"{len(mudancas)} change(s) in {n_alvos} task(s) from sheet '{aba}' of {arquivo}"
+                  f"  ({n_tarefas} saved tasks checked). Only the fields that differ are listed."
+             ).pack(fill="x", padx=12, pady=(10, 2))
+    tk.Label(win, bg=BG, fg="#555555", font=("Segoe UI", 8), anchor="w", justify="left",
+             text="The sheet never erases saved values: empty cells are ignored, and '#' in MASS BEFORE marks a sample "
+                  "as not tested only if it has no measurements yet."
+             ).pack(fill="x", padx=12)
+    if revisadas:
+        tk.Label(win, bg=BG, fg=CORES_STATUS[STATUS_INCOMPLETO][0], font=("Segoe UI", 9, "bold"), anchor="w",
+                 justify="left", wraplength=940,
+                 text="⚠ Already reviewed – applying clears the review, so they must be reviewed again: "
+                      + ", ".join(revisadas)).pack(fill="x", padx=12, pady=(4, 0))
+
+    quadro = tk.Frame(win, bg=BG)
+    quadro.pack(fill="both", expand=True, padx=12, pady=8)
+    cols = ("Sample", "Field", "Current", "New (sheet)", "Sheet row")
+    tv = ttk.Treeview(quadro, columns=cols, show="tree headings")
+    tv.heading("#0", text="Task")
+    tv.column("#0", width=330)
+    for c, w in zip(cols, (70, 170, 130, 130, 80)):
+        tv.heading(c, text=c)
+        tv.column(c, width=w, anchor="center")
+    tv.tag_configure("tarefa", font=("Segoe UI", 9, "bold"))
+    tv.tag_configure("revisada", foreground=CORES_STATUS[STATUS_INCOMPLETO][0], font=("Segoe UI", 9, "bold"))
+    barra = ttk.Scrollbar(quadro, orient="vertical", command=tv.yview)
+    tv.configure(yscrollcommand=barra.set)
+    tv.pack(side="left", fill="both", expand=True)
+    barra.pack(side="right", fill="y")
+
+    nos = {}
+    for m in mudancas:
+        if m["alvo"] not in nos:
+            titulo = (f"Task {m['alvo']} – {m['pid']}" if m["alvo"] is not None else f"Current form – {m['pid']}") \
+                     + (f"   (run {m['run']})" if m["run"] else "")
+            nos[m["alvo"]] = tv.insert("", "end", text=titulo, open=True,
+                                       tags=("revisada" if m["revisada"] else "tarefa",))
+        nome = CAMPOS_SYNC_IDENT.get(m["campo"]) or CAMPOS_SYNC_EF[m["campo"]][1]
+        tv.insert(nos[m["alvo"]], "end", text="", values=(m["amostra"] or "-", nome, m["antigo"] or "(empty)",
+                                                         m["novo"] or "(empty)", m["linha"]))
+
+    botoes = tk.Frame(win, bg=BG)
+    botoes.pack(fill="x", padx=12, pady=(0, 12))
+    lbl = tk.Label(botoes, bg=BG, fg="#2e7d32", font=("Segoe UI", 9, "bold"))
+    lbl.pack(side="left")
+
+    def aplicar():
+        aplicar_mudancas_planilha(mudancas, arquivo)
+        btn_aplicar.destroy()
+        btn_cancelar.config(text="Close")
+        lbl.config(text=f"✔ {len(mudancas)} change(s) applied at {datetime.now().strftime('%H:%M')}.")
+        info = widgets_ef.get("import_info")
+        if info is not None:
+            try:
+                info.config(fg="#2e7d32", text=f"Synced from {arquivo} ({aba}) at {datetime.now().strftime('%H:%M')}: "
+                            f"{len(mudancas)} change(s) in {n_alvos} task(s).")
+            except tk.TclError:
+                pass
+
+    btn_cancelar = ttk.Button(botoes, text="Cancel", command=win.destroy)
+    btn_cancelar.pack(side="right", padx=(8, 0))
+    btn_aplicar = tk.Button(botoes, text="Apply changes", command=aplicar, bg="#2e7d32", fg="white",
+                            font=("Segoe UI", 10, "bold"), padx=15, pady=4, relief="flat")
+    btn_aplicar.pack(side="right")
+
+
+def importar_eficiencia_planilha(parent):
+    """Sincroniza a planilha DUNE_Control.xlsx inteira com as tarefas gravadas (massas, área e x de P02/P03/P14)."""
+    ultimo = ler_config("planilha_eficiencia")
+    caminho = filedialog.askopenfilename(
+        parent=parent, title="Select the DUNE_Control spreadsheet",
+        initialdir=os.path.dirname(ultimo) if ultimo and os.path.isdir(os.path.dirname(ultimo))
+        else os.path.expanduser("~/Downloads"),
+        filetypes=[("Excel", "*.xlsx *.xlsm"), ("All files", "*.*")])
+    if not caminho:
+        return
+    try:
+        aba, linhas = ler_planilha_eficiencia(caminho)
+    except ImportError:
+        messagebox.showerror("Import", "The 'openpyxl' package is required.\n"
+                             "Install it with:  python -m pip install openpyxl", parent=parent)
+        return
+    except Exception as e:
+        messagebox.showerror("Import", "Could not read the spreadsheet:\n\n" + str(e), parent=parent)
+        return
+    gravar_config("planilha_eficiencia", caminho)
+
+    mudancas, n_tarefas = mudancas_planilha(linhas)
+    if not mudancas:
+        messagebox.showinfo("Sync Leptons Control Sheet",
+                            f"Everything is up to date: no differences between sheet '{aba}' "
+                            f"({len(linhas)} sample rows) and the {n_tarefas} saved tasks.", parent=parent)
+        return
+    janela_mudancas_planilha(parent, mudancas, n_tarefas, os.path.basename(caminho), aba)
 
 
 def abrir_eficiencia_optica():
@@ -2544,6 +3199,20 @@ def abrir_eficiencia_optica():
     tk.Label(quadro_rev, text="The batch decision is final only after the Technical Supervisor signs the record.",
              bg=BG, fg="#777777", font=("Segoe UI", 8)).grid(row=1, column=0, columnspan=6, sticky="w", pady=(4, 0))
 
+    # ---------- importação da planilha ----------
+    barra_imp = tk.Frame(win, bg=BG)
+    barra_imp.pack(fill="x", padx=12, pady=(10, 0))
+    tk.Label(barra_imp, text="Run:", bg=BG, font=("Segoe UI", 9, "bold")).pack(side="left")
+    ttk.Entry(barra_imp, textvariable=inspecao_vars["cab"]["run_evaporation"], width=22).pack(side="left", padx=(4, 8))
+    ttk.Button(barra_imp, text="Sync Leptons Control Sheet",
+               command=lambda: importar_eficiencia_planilha(win)).pack(side="left")
+    lbl_imp = tk.Label(barra_imp, bg=BG, fg="#555555", font=("Segoe UI", 8), justify="left", wraplength=620,
+                       text="Compares the whole 'Efficiency Test' sheet with every saved task (matched by RUN, "
+                            "e.g. DUNE_EVAP_#0002#) and shows only what changed before applying. "
+                            "For a new task, type its Run here first.")
+    lbl_imp.pack(side="left", padx=10)
+    widgets_ef["import_info"] = lbl_imp
+
     # ---------- dados do teste ----------
     quadro_t = tk.LabelFrame(win, text="Test data", bg=BG, font=("Segoe UI", 10, "bold"), padx=10, pady=8)
     quadro_t.pack(fill="x", padx=12, pady=(10, 4))
@@ -2575,14 +3244,14 @@ def abrir_eficiencia_optica():
     ttk.Entry(quadro_t, textvariable=tv["operador"], width=22).grid(row=2, column=5, sticky="w")
 
     # ---------- caracterização das amostras ----------
-    quadro_c = tk.LabelFrame(win, text="QC samples – dimensions and mass", bg=BG,
+    quadro_c = tk.LabelFrame(win, text="QC samples – mass and area (same columns as the Leptons Control Sheet)", bg=BG,
                              font=("Segoe UI", 10, "bold"), padx=8, pady=8)
     quadro_c.pack(fill="x", padx=12, pady=(4, 4))
-    for c in range(8):
+    for c in range(7):
         quadro_c.grid_columnconfigure(c, weight=1, uniform="colc")
 
-    cab_c = ["Control position", "Tested?", "Length (mm)", "Width (mm)", "Mass before (g)", "Mass after (g)",
-             "Area (cm²)", "Mass density\n(µg/cm²)"]
+    cab_c = ["Control position", "Tested?", "Mass before (g)", "Mass after (g)", "M.after − M.before\n(g)",
+             "Area (cm²)", "Density\n(µg/cm²)"]
     for c, titulo in enumerate(cab_c):
         tk.Label(quadro_c, text=titulo, bg=AZUL, fg="white", font=("Segoe UI", 9, "bold"),
                  pady=6).grid(row=0, column=c, sticky="nsew", padx=(0, 1))
@@ -2605,7 +3274,7 @@ def abrir_eficiencia_optica():
             ).pack(side="left", padx=4)
 
         entradas = []
-        for c, chave in ((2, "comp"), (3, "larg"), (4, "antes"), (5, "depois")):
+        for c, chave in ((2, "antes"), (3, "depois"), (5, "area")):
             cel = tk.Frame(quadro_c, bg=bg)
             cel.grid(row=i, column=c, sticky="nsew", padx=(0, 1), pady=(0, 1))
             ent = ttk.Entry(cel, textvariable=v[chave], width=11, justify="center")
@@ -2613,7 +3282,7 @@ def abrir_eficiencia_optica():
             entradas.append(ent)
         widgets_ef["ent_" + amostra] = entradas
 
-        for c, chave in ((6, "area"), (7, "dens")):
+        for c, chave in ((4, "dif"), (6, "dens")):
             tk.Label(quadro_c, textvariable=v[chave], bg=bg, font=("Segoe UI", 10)).grid(
                 row=i, column=c, sticky="nsew", padx=(0, 1), pady=(0, 1))
 
@@ -2624,7 +3293,7 @@ def abrir_eficiencia_optica():
     for c in range(3):
         quadro_e.grid_columnconfigure(c, weight=1, uniform="cole")
 
-    cab_e = ["Control position", "Efficiency", f"Condition (x ≥ {LIMITE_EFICIENCIA:g})"]
+    cab_e = ["Control position", "Relative efficiency (x)", f"Condition (x ≥ {LIMITE_EFICIENCIA:g})"]
     for c, titulo in enumerate(cab_e):
         tk.Label(quadro_e, text=titulo, bg=AZUL, fg="white", font=("Segoe UI", 9, "bold"),
                  pady=6).grid(row=0, column=c, sticky="nsew", padx=(0, 1))
@@ -2655,8 +3324,8 @@ def abrir_eficiencia_optica():
               f"x ≥ {LIMITE_EFICIENCIA:g}  →  Approved;   x < {LIMITE_EFICIENCIA:g}  →  Rejected;   no upper bound.\n"
               f"•  Batch APPROVED only if at least {MIN_AMOSTRAS_EFICIENCIA} samples are tested and every tested sample has "
               f"x ≥ {LIMITE_EFICIENCIA:g}; one tested sample below {LIMITE_EFICIENCIA:g} rejects the entire batch.\n"
-              f"•  Mass density = (mass after − mass before) / area, area = length × width "
-              f"(same as the main screen, for these smaller samples).")
+              f"•  Density (µg/cm²) = (mass after − mass before) × 10⁶ / area (cm²), as in the Leptons Control Sheet. "
+              f"\"Sync Leptons Control Sheet\" updates these values in every task from its 'Efficiency Test' sheet.")
     ).pack(anchor="w")
 
     _pintar_eficiencia()
@@ -2856,7 +3525,7 @@ def estado_eficiencia_dados(d):
     algum = False
     for amostra in AMOSTRAS_EFICIENCIA:
         r = d["ef_amostras"].get(amostra) or {}
-        if any((r.get(k) or "") for k in ("testada", "comprimento_mm", "largura_mm", "massa_antes",
+        if any((r.get(k) or "") for k in ("testada", "area_cm2", "comprimento_mm", "largura_mm", "massa_antes",
                                             "massa_depois", "eficiencia")):
             algum = True
         if r.get("testada") != "Yes":
@@ -2882,6 +3551,120 @@ def decisao_lote(estado_im, estado_ef):
     if estado_im == "approved" and estado_ef == "approved":
         return "APPROVED"
     return "PENDING"
+
+
+# ---------------- situação da tarefa (Incomplete -> To be reviewed -> Completed) ----------------
+STATUS_INCOMPLETO = "Incomplete"
+STATUS_REVISAR = "To be reviewed"
+STATUS_COMPLETO = "Completed"
+# status: (cor do texto, cor de fundo) na tabela
+CORES_STATUS = {STATUS_INCOMPLETO: ("#c62828", "#fdecea"), STATUS_REVISAR: ("#1565c0", "#e3eefc"),
+                STATUS_COMPLETO: ("#2e7d32", "#e6f4ea")}
+PERFIS_REVISORES = ("Admin", "Supervisor/QA")      # quem pode marcar uma tarefa como revisada
+
+
+def pendencias_dados(d):
+    """O que ainda falta para o relatório (PDF) da tarefa ficar completo. Lista vazia = pronta para revisão.
+
+    Observações, anexos e as revisões do Technical Supervisor de cada teste não são obrigatórios."""
+    t, c, te = d["tarefa"], d["cab"], d["ef_teste"]
+    falta = []
+
+    def exige(valor, texto):
+        if not str(valor or "").strip():
+            falta.append(texto)
+
+    # deposição
+    exige(t.get("codigo_tarefa"), "Deposition: PID")
+    exige(t.get("data_inicio"), "Deposition: deposition date")
+    exige(t.get("responsavel"), "Deposition: responsible")
+    if not d["lotes"]:
+        falta.append("Deposition: batch / internal lot")
+    exige(t.get("position_range"), "Deposition: position filters")
+    exige(t.get("massa_ptp_g"), "Deposition: PTP mass")
+    massas = {m["posicao"]: m for m in d["massas"]}
+    for pos in (2, 3, 14):
+        m = massas.get(pos) or {}
+        if not (str(m.get("massa_antes") or "").strip() and str(m.get("massa_depois") or "").strip()):
+            falta.append(f"Mass control: position {pos}")
+
+    # inspeção visual
+    for chave, texto in (("run_evaporation", "run evaporation"), ("inspector", "inspector"),
+                         ("pid_p02", "P02 PID"), ("pid_p03", "P03 PID"), ("pid_p14", "P14 PID"),
+                         ("data_inspecao", "inspection date"), ("operador", "performed by")):
+        exige(c.get(chave), "Visual inspection: " + texto)
+    completos, _, _ = resumo_visual_dados(d)
+    if completos < N_FILTROS:
+        falta.append(f"Visual inspection: {N_FILTROS - completos} of {N_FILTROS} filters not fully classified")
+
+    # imersão criogênica
+    exige(t.get("imersao_data"), "Cryogenic immersion: test date")
+    exige(t.get("imersao_operador"), "Cryogenic immersion: performed by")
+    sem_massa = [a for a in AMOSTRAS_IMERSAO if not (d["im_massas"].get(a) or {}).get("aprovado")]
+    if sem_massa:
+        falta.append("Cryogenic immersion: masses of " + ", ".join(sem_massa))
+    sem_item = [chave for chave, *_ in ITENS_IMERSAO if not d["im_itens"].get(chave)]
+    if sem_item:
+        falta.append(f"Cryogenic immersion: {len(sem_item)} of {len(ITENS_IMERSAO)} post-immersion checks")
+
+    # eficiência óptica
+    for chave, texto in (("data_teste", "test date"), ("ref_id", "reference substrate ID"),
+                         ("ref_data", "reference installation date"), ("temperatura_c", "room temperature"),
+                         ("umidade_pct", "relative humidity"), ("operador", "performed by")):
+        exige(te.get(chave), "Optical efficiency: " + texto)
+    testadas = 0
+    for amostra in AMOSTRAS_EFICIENCIA:
+        r = d["ef_amostras"].get(amostra) or {}
+        if r.get("testada") == "No":
+            continue
+        if r.get("testada") != "Yes":
+            falta.append(f"Optical efficiency: {amostra} – Tested? not answered")
+            continue
+        testadas += 1
+        faltam = [nome for chave, nome in (("massa_antes", "mass before"), ("massa_depois", "mass after"))
+                  if not str(r.get(chave) or "").strip()]
+        if not area_amostra_ef(r):
+            faltam.append("area")
+        if not str(r.get("eficiencia") or "").strip():
+            faltam.append("relative efficiency")
+        if faltam:
+            falta.append(f"Optical efficiency: {amostra} – " + ", ".join(faltam))
+    if testadas < MIN_AMOSTRAS_EFICIENCIA:
+        falta.append(f"Optical efficiency: at least {MIN_AMOSTRAS_EFICIENCIA} tested samples")
+    return falta
+
+
+def status_tarefa_dados(d):
+    """Incomplete (falta informação) -> To be reviewed (tudo preenchido) -> Completed (revisada / QA sign-off)."""
+    if pendencias_dados(d):
+        return STATUS_INCOMPLETO
+    por, _data = _signoff_dados(d["tarefa"])
+    return STATUS_COMPLETO if por else STATUS_REVISAR
+
+
+def atualizar_status_tarefa(tarefa_id):
+    """Recalcula e grava a situação da tarefa. Retorna (status, pendências)."""
+    d = coletar_dados_relatorio(tarefa_id)
+    if d is None:
+        return None, []
+    pend = pendencias_dados(d)
+    status = status_tarefa_dados(d)
+    if d["tarefa"].get("status") != status:
+        conn = conectar()
+        conn.execute("UPDATE tarefas SET status = ? WHERE id = ?", (status, tarefa_id))
+        conn.commit()
+        conn.close()
+    return status, pend
+
+
+def texto_status_salvo(status, pend):
+    """Mensagem mostrada depois de gravar a tarefa."""
+    if status == STATUS_INCOMPLETO:
+        lista = "\n".join("•  " + p for p in pend[:12]) + (f"\n•  ... and {len(pend) - 12} more" if len(pend) > 12 else "")
+        return f"Status: {status} – missing information:\n\n" + lista
+    if status == STATUS_REVISAR:
+        return f"Status: {status} – all the information is filled. A Supervisor/QA can now review it (Review task)."
+    return f"Status: {status}"
 
 
 TXT_ESTADO = {"approved": "APPROVED", "rejected": "REJECTED", "partial": "IN PROGRESS", "empty": "NOT FILLED"}
@@ -3097,16 +3880,11 @@ def _bloco_ef(d):
     for amostra in AMOSTRAS_EFICIENCIA:
         r = d["ef_amostras"].get(amostra) or {}
         testada = r.get("testada") or ""
-        try:
-            area = converter_float(r.get("comprimento_mm")) * converter_float(r.get("largura_mm")) / 100.0
-            area_txt = format(area, ".2f")
-        except Exception:
-            area_txt = "-"
         dens = r.get("densidade_ug_cm2") or "-"
         l_c += ("<tr><td><b>" + amostra + "</b></td><td class='l'>" + _cx(["Yes", "No"], testada) + "</td><td>"
-                + (_esc(r.get("comprimento_mm")) or "-") + "</td><td>" + (_esc(r.get("largura_mm")) or "-") + "</td><td>"
                 + (_esc(r.get("massa_antes")) or "-") + "</td><td>" + (_esc(r.get("massa_depois")) or "-") + "</td><td>"
-                + _esc(area_txt) + "</td><td>" + _esc(dens) + "</td></tr>")
+                + (_esc(diferenca_massas_ef(r)) or "-") + "</td><td>" + (_esc(area_amostra_ef(r)) or "-") + "</td><td>"
+                + _esc(dens) + "</td></tr>")
         if testada == "No":
             cond = "<span class='neutro'>Not tested</span>"
         elif (r.get("aprovado") or "") == "Yes":
@@ -3117,10 +3895,10 @@ def _bloco_ef(d):
             cond = "-"
         l_e += ("<tr><td><b>" + amostra + "</b></td><td>" + (_esc(r.get("eficiencia")) or "-") + "</td><td>" + cond + "</td></tr>")
 
-    tab_c = ("<h3>QC samples &ndash; dimensions and mass</h3><div class='scroll'><table class='zebra'><tr><th>Control position</th>"
-             "<th>Tested?</th><th>Length (mm)</th><th>Width (mm)</th><th>Mass before (g)</th><th>Mass after (g)</th>"
-             "<th>Area (cm&sup2;)</th><th>Mass density (&micro;g/cm&sup2;)</th></tr>" + l_c + "</table></div>")
-    tab_e = ("<h3>Efficiency analysis</h3><div class='scroll'><table class='zebra'><tr><th>Control position</th><th>Efficiency</th>"
+    tab_c = ("<h3>QC samples &ndash; mass and area</h3><div class='scroll'><table class='zebra'><tr><th>Control position</th>"
+             "<th>Tested?</th><th>Mass before (g)</th><th>Mass after (g)</th><th>M.after &minus; M.before (g)</th>"
+             "<th>Area (cm&sup2;)</th><th>Density (&micro;g/cm&sup2;)</th></tr>" + l_c + "</table></div>")
+    tab_e = ("<h3>Efficiency analysis</h3><div class='scroll'><table class='zebra'><tr><th>Control position</th><th>Relative efficiency (x)</th>"
              "<th>Condition (x &ge; " + format(LIMITE_EFICIENCIA, "g") + ")</th></tr>" + l_e + "</table></div>")
     nota = ("<p class='nota'>Only samples marked Tested = Yes are evaluated. x = UV transmission efficiency relative to the "
             "reference substrate; x &ge; " + format(LIMITE_EFICIENCIA, "g") + " is approved (no upper bound). The batch is approved only "
@@ -3620,19 +4398,16 @@ def gerar_pdf_relatorio(tarefa_id, caminho):
     ]
     story.append(tabela(linhas_t, [93, 93], cabecalho=False))
 
-    story.append(Paragraph("QC samples - dimensions and mass", est_h3))
-    linhas_s = [[H("Control position"), H("Tested?"), H("Length (mm)"), H("Width (mm)"), H("Mass before (g)"),
-                 H("Mass after (g)"), H("Area (cm²)"), H("Mass density (µg/cm²)")]]
-    linhas_x = [[H("Control position"), H("Efficiency"), H("Condition (x >= " + format(LIMITE_EFICIENCIA, "g") + ")")]]
+    story.append(Paragraph("QC samples - mass and area", est_h3))
+    linhas_s = [[H("Control position"), H("Tested?"), H("Mass before (g)"), H("Mass after (g)"),
+                 H("M.after − M.before (g)"), H("Area (cm²)"), H("Density (µg/cm²)")]]
+    linhas_x = [[H("Control position"), H("Relative efficiency (x)"),
+                 H("Condition (x >= " + format(LIMITE_EFICIENCIA, "g") + ")")]]
     extra_x = [("ALIGN", (0, 1), (-1, -1), "CENTER")]
     for i, amostra in enumerate(AMOSTRAS_EFICIENCIA, start=1):
         r = d["ef_amostras"].get(amostra) or {}
-        try:
-            area = format(converter_float(r.get("comprimento_mm")) * converter_float(r.get("largura_mm")) / 100.0, ".2f")
-        except Exception:
-            area = "-"
-        linhas_s.append([P(amostra), P(r.get("testada")), P(r.get("comprimento_mm")), P(r.get("largura_mm")),
-                         P(r.get("massa_antes")), P(r.get("massa_depois")), P(area), P(r.get("densidade_ug_cm2"))])
+        linhas_s.append([P(amostra), P(r.get("testada")), P(r.get("massa_antes")), P(r.get("massa_depois")),
+                         P(diferenca_massas_ef(r)), P(area_amostra_ef(r)), P(r.get("densidade_ug_cm2"))])
         if r.get("testada") == "No":
             cond_txt, cor_c = "Not tested", CINZA
         elif (r.get("aprovado") or "") == "Yes":
@@ -3643,7 +4418,7 @@ def gerar_pdf_relatorio(tarefa_id, caminho):
             cond_txt, cor_c = "-", CINZA
         linhas_x.append([amostra, r.get("eficiencia") or "-", cond_txt])
         extra_x += [("TEXTCOLOR", (2, i), (2, i), cor_c), ("FONTNAME", (2, i), (2, i), negrito)]
-    story.append(tabela(linhas_s, [24, 18, 22, 22, 25, 25, 22, 28],
+    story.append(tabela(linhas_s, [26, 18, 28, 28, 32, 24, 30],
                         extra=[("ALIGN", (0, 1), (-1, -1), "CENTER")]))
     story.append(Paragraph("Efficiency analysis", est_h3))
     story.append(tabela(linhas_x, [50, 68, 68], extra=extra_x))
@@ -3786,6 +4561,115 @@ def gerar_todos_pdfs():
 signoff_vars = {}
 
 
+def abrir_revisao_tarefa():
+    """Resumo da tarefa selecionada para revisão; o botão "Reviewed" faz o QA sign-off (tarefa -> Completed)."""
+    tarefa_id = _tarefa_selecionada()
+    if tarefa_id is None:
+        return
+    d = coletar_dados_relatorio(tarefa_id)
+    if d is None:
+        messagebox.showwarning("Review", "Task not found in the database.")
+        return
+    pend = pendencias_dados(d)
+    status = status_tarefa_dados(d)
+    t, c = d["tarefa"], d["cab"]
+    cor, fundo = CORES_STATUS[status]
+    BG = "#f4f6f8"
+
+    win = tk.Toplevel(janela)
+    win.title(f"Review – {t.get('codigo_tarefa') or tarefa_id}")
+    win.configure(bg=BG)
+    win.transient(janela)
+
+    topo = tk.Frame(win, bg=fundo, highlightbackground=cor, highlightthickness=2)
+    topo.pack(fill="x", padx=12, pady=(12, 6))
+    tk.Label(topo, text=status.upper(), bg=fundo, fg=cor, font=("Segoe UI", 16, "bold")).pack(pady=(8, 0))
+    por, data = _signoff_dados(t)
+    sub = {STATUS_INCOMPLETO: "Missing information – complete the task before it can be reviewed.",
+           STATUS_REVISAR: "All the information is filled. Check it in the report, then click Reviewed.",
+           STATUS_COMPLETO: f"Reviewed by {por} on {data or '-'}."}[status]
+    tk.Label(topo, text=sub, bg=fundo, fg="#333333", font=("Segoe UI", 10)).pack(padx=12, pady=(0, 8))
+
+    info = tk.Frame(win, bg=BG, padx=16, pady=6)
+    info.pack(fill="x")
+    ei, ee = estado_imersao_dados(d), estado_eficiencia_dados(d)
+    completos, cont, _ = resumo_visual_dados(d)
+    lotes_txt = ", ".join(str(l.get("lote_interno") or l.get("interno") or "-") for l in d["lotes"]) or "-"
+    linhas = [
+        ("PID", t.get("codigo_tarefa")), ("Run evaporation", c.get("run_evaporation")),
+        ("Deposition date", t.get("data_inicio")), ("Responsible", t.get("responsavel")),
+        ("Batches", lotes_txt),
+        ("Visual inspection", f"{completos}/{N_FILTROS} classified – A: {cont['A']}  B: {cont['B']}  C: {cont['C']}"),
+        ("Cryogenic immersion", TXT_ESTADO[ei]), ("Optical efficiency", TXT_ESTADO[ee]),
+        ("Batch decision", decisao_lote(ei, ee)),
+    ]
+    for i, (rotulo, valor) in enumerate(linhas):
+        tk.Label(info, text=rotulo + ":", bg=BG, font=("Segoe UI", 10, "bold")).grid(row=i, column=0, sticky="w", pady=1)
+        tk.Label(info, text=valor or "-", bg=BG, font=("Segoe UI", 10)).grid(row=i, column=1, sticky="w", padx=(10, 0))
+
+    if pend:
+        quadro_p = tk.LabelFrame(win, text=f"Missing information ({len(pend)})", bg=BG, fg=CORES_STATUS[STATUS_INCOMPLETO][0],
+                                 font=("Segoe UI", 10, "bold"), padx=8, pady=6)
+        quadro_p.pack(fill="both", expand=True, padx=12, pady=6)
+        txt = tk.Text(quadro_p, height=min(12, len(pend)), width=80, font=("Segoe UI", 9), bd=0, bg=BG)
+        txt.insert("1.0", "\n".join("•  " + p for p in pend))
+        txt.config(state="disabled")
+        txt.pack(fill="both", expand=True)
+
+    barra = tk.Frame(win, bg=BG)
+    barra.pack(fill="x", padx=12, pady=(6, 12))
+
+    def abrir_no_navegador():
+        preparado = _preparar_relatorio(tarefa_id)
+        if preparado is not None:
+            webbrowser.open(preparado[1])
+
+    ttk.Button(barra, text="Open report", command=abrir_no_navegador).pack(side="left", padx=(0, 6))
+    ttk.Button(barra, text="Print report (PDF)", command=imprimir_relatorio_pdf).pack(side="left", padx=6)
+    ttk.Button(barra, text="Close", command=win.destroy).pack(side="right")
+
+    pode_revisar = leptons_auth.usuario_atual.get("perfil") in PERFIS_REVISORES
+    btn_rev = tk.Button(barra, text="✔ Reviewed", bg=CORES_STATUS[STATUS_COMPLETO][0], fg="white",
+                        font=("Segoe UI", 10, "bold"), padx=14, pady=4, relief="flat",
+                        command=lambda: marcar_tarefa_revisada(tarefa_id, win))
+    btn_rev.pack(side="right", padx=8)
+    if status != STATUS_REVISAR or not pode_revisar:
+        btn_rev.config(state="disabled", bg="#9e9e9e")
+        if status == STATUS_REVISAR:
+            tk.Label(win, text="Only " + " or ".join(PERFIS_REVISORES) + " users can mark a task as reviewed.",
+                     bg=BG, fg="#777777", font=("Segoe UI", 8)).pack(anchor="e", padx=12, pady=(0, 8))
+
+
+def marcar_tarefa_revisada(tarefa_id, win=None):
+    """QA sign-off com o usuário logado e a data de hoje: a tarefa passa a Completed."""
+    if leptons_auth.usuario_atual.get("perfil") not in PERFIS_REVISORES:
+        messagebox.showwarning("Review", "Only " + " or ".join(PERFIS_REVISORES) + " users can review tasks.", parent=win)
+        return
+    d = coletar_dados_relatorio(tarefa_id)       # confere de novo: a tarefa pode ter mudado
+    if d is None or status_tarefa_dados(d) != STATUS_REVISAR:
+        messagebox.showwarning("Review", "This task is not ready for review (or was already reviewed).", parent=win)
+        return
+    nome = leptons_auth.nome_responsavel()
+    hoje = datetime.today().strftime("%Y-%m-%d")
+    pid = d["tarefa"].get("codigo_tarefa") or ""
+    if not messagebox.askyesno("Review", f"Mark task {pid} as reviewed?\n\nFinal QA Sign-Off by: {nome}\nDate: {hoje}",
+                               parent=win):
+        return
+    conn = conectar()
+    conn.execute("UPDATE tarefas SET qa_signoff_por = ?, qa_signoff_data = ?, status = ? WHERE id = ?",
+                 (nome, hoje, STATUS_COMPLETO, tarefa_id))
+    conn.commit()
+    conn.close()
+    leptons_auth.registrar("TASK_REVIEWED", f"id={tarefa_id} PID={pid}")
+    if tarefa_em_edicao_id is not None and str(tarefa_em_edicao_id) == str(tarefa_id):
+        signoff_vars["por"].set(nome)          # a tarefa está aberta na tela: mostra o sign-off
+        signoff_vars["data"].set(hoje)
+    carregar_tarefas()
+    if win is not None:
+        win.destroy()
+    messagebox.showinfo("Review", f"Task {pid} reviewed – status: {STATUS_COMPLETO}.")
+
+
 def criar_variaveis_signoff():
     signoff_vars["por"] = tk.StringVar(master=janela, value="")
     signoff_vars["data"] = tk.StringVar(master=janela, value="")
@@ -3815,10 +4699,10 @@ def atualizar_status_signoff(*args):
     try:
         por = signoff_vars["por"].get().strip()
         data = signoff_vars["data"].get().strip()
-        if por and data:
-            lbl_status_signoff.config(text="Signed", fg="#2e7d32")
+        if por:
+            lbl_status_signoff.config(text="Reviewed – " + STATUS_COMPLETO, fg=CORES_STATUS[STATUS_COMPLETO][0])
         else:
-            lbl_status_signoff.config(text="Pending", fg="#888888")
+            lbl_status_signoff.config(text="Pending review", fg="#888888")
     except (NameError, tk.TclError):
         pass
 
@@ -4215,12 +5099,12 @@ quadro_signoff = tk.LabelFrame(quadro_qualidade, text="Final QA Sign-Off", bg="#
 quadro_signoff.grid(row=6, column=0, sticky="we", pady=(14, 0))
 tk.Label(quadro_signoff, text="Final QA Sign-Off by:", bg="#f4f6f8", font=("Segoe UI", 9, "bold")).grid(
     row=0, column=0, columnspan=3, sticky="w")
-ttk.Entry(quadro_signoff, textvariable=signoff_vars["por"], width=36).grid(
+ttk.Entry(quadro_signoff, textvariable=signoff_vars["por"], width=36, state="readonly").grid(
     row=1, column=0, columnspan=3, sticky="we", pady=(2, 6))
 tk.Label(quadro_signoff, text="Date:", bg="#f4f6f8", font=("Segoe UI", 9, "bold")).grid(row=2, column=0, sticky="w")
-ttk.Entry(quadro_signoff, textvariable=signoff_vars["data"], width=14).grid(row=2, column=1, padx=(6, 4))
-ttk.Button(quadro_signoff, text="Today", width=7,
-           command=lambda: signoff_vars["data"].set(datetime.today().strftime("%Y-%m-%d"))).grid(row=2, column=2)
+ttk.Entry(quadro_signoff, textvariable=signoff_vars["data"], width=14, state="readonly").grid(row=2, column=1, padx=(6, 4))
+tk.Label(quadro_signoff, text="Filled by the \"Reviewed\" button (Review task).", bg="#f4f6f8", fg="#777777",
+         font=("Segoe UI", 8)).grid(row=4, column=0, columnspan=3, sticky="w")
 lbl_status_signoff = tk.Label(quadro_signoff, text="Pending", bg="#f4f6f8", fg="#888888", font=("Segoe UI", 9, "bold"))
 lbl_status_signoff.grid(row=3, column=0, columnspan=3, sticky="w", pady=(6, 0))
 atualizar_status_signoff()
@@ -4299,22 +5183,49 @@ tk.Button(btn1, text="Delete", command=excluir_tarefa, bg="#c62828", fg="white",
 ttk.Button(btn1, text="Generate QR Code", command=gerar_qr).pack(side="left", padx=8, ipadx=10)
 ttk.Button(btn1, text="Print report (PDF)", command=imprimir_relatorio_pdf).pack(side="left", padx=8, ipadx=10)
 ttk.Button(btn2, text="Export all PDFs", command=gerar_todos_pdfs).pack(side="left", padx=8, ipadx=10)
+ttk.Button(btn2, text="Export task (JSON)", command=exportar_tarefa_json).pack(side="left", padx=8, ipadx=10)
+ttk.Button(btn2, text="Import task (JSON)", command=importar_tarefa_json).pack(side="left", padx=8, ipadx=10)
 ttk.Button(btn2, text="Backup now", command=backup_agora).pack(side="left", padx=8, ipadx=10)
+ttk.Button(btn2, text="Sync Leptons Control Sheet", command=lambda: importar_eficiencia_planilha(janela)).pack(side="left", padx=8, ipadx=10)
 ttk.Button(btn1, text="View details", command=abrir_detalhes_tarefa).pack(side="left", padx=8, ipadx=10)
+tk.Button(btn2, text="Review task", command=abrir_revisao_tarefa, bg=CORES_STATUS[STATUS_REVISAR][0], fg="white",
+          font=("Segoe UI", 10, "bold"), padx=15, pady=4, relief="flat").pack(side="left", padx=8)
+
+# ---------- BUSCA ----------
+busca_tarefa_var = tk.StringVar()
+filtro_status_var = tk.StringVar(value="All")
+frame_busca = tk.Frame(frame, bg="#f4f6f8")
+frame_busca.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(6, 0))
+tk.Label(frame_busca, text="Search:", bg="#f4f6f8", font=("Segoe UI", 10, "bold")).pack(side="left")
+entry_busca_tarefa = ttk.Entry(frame_busca, textvariable=busca_tarefa_var, width=40)
+entry_busca_tarefa.pack(side="left", padx=(6, 4))
+entry_busca_tarefa.bind("<KeyRelease>", filtrar_tarefas)
+tk.Label(frame_busca, text="PID, run, batch, responsible, date…", bg="#f4f6f8", fg="#777777",
+         font=("Segoe UI", 8)).pack(side="left", padx=(0, 14))
+tk.Label(frame_busca, text="Status:", bg="#f4f6f8", font=("Segoe UI", 10, "bold")).pack(side="left")
+combo_filtro_status = ttk.Combobox(frame_busca, textvariable=filtro_status_var, state="readonly", width=16,
+                                   values=("All", STATUS_INCOMPLETO, STATUS_REVISAR, STATUS_COMPLETO))
+combo_filtro_status.pack(side="left", padx=(6, 8))
+combo_filtro_status.bind("<<ComboboxSelected>>", filtrar_tarefas)
+ttk.Button(frame_busca, text="Clear filter", command=limpar_busca_tarefas).pack(side="left", padx=4)
+lbl_contagem_tarefas = tk.Label(frame_busca, text="", bg="#f4f6f8", fg="#555555", font=("Segoe UI", 9))
+lbl_contagem_tarefas.pack(side="left", padx=12)
 
 # ---------- TABELA ----------
-cols = ("ID", "PID", "Internal Batch", "Responsible", "Deposition Date", "Visual Inspection", "Optical Efficiency", "Cryogenic Immersion")
+cols = ("ID", "PID", "Status", "Internal Batch", "Responsible", "Deposition Date", "Visual Inspection", "Optical Efficiency", "Cryogenic Immersion")
 tabela = ttk.Treeview(frame, columns=cols, show="headings", height=8)
-tabela.grid(row=3, column=0, columnspan=3, sticky="nsew", pady=10)
+tabela.grid(row=4, column=0, columnspan=3, sticky="nsew", pady=(4, 10))
 
 for c in cols:
     tabela.heading(c, text=c)
     tabela.column(c, anchor="center", width=120)
 
 tabela.column("Internal Batch", width=240)      # lote interno (caixa menor) usado na deposição
+for _status, (_texto, _fundo) in CORES_STATUS.items():
+    tabela.tag_configure(_status, foreground=_texto, background=_fundo)
 tabela.bind("<Double-1>", lambda event: carregar_para_edicao())
 
-frame.rowconfigure(3, weight=1)
+frame.rowconfigure(4, weight=1)
 frame.columnconfigure(1, weight=1)
 
 carregar_tarefas()
