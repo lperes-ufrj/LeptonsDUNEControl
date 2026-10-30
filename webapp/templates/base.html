@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block titulo %}Deposition Control{% endblock %} · LEPTONS</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topo">
+    <a class="marca" href="{{ url_for('lista') }}">
+      <img src="{{ url_for('logo', nome='esquerda.png') }}" alt="">
+      <span>Deposition Control</span>
+    </a>
+    <nav class="nav">
+      <a href="{{ url_for('lista') }}" class="ativo">Tasks</a>
+    </nav>
+    <div class="direita">
+      <form class="busca-topo" action="{{ url_for('lista') }}">
+        <input name="q" value="{{ q or '' }}" placeholder="Search run, PID, batch, responsible…" autocomplete="off">
+      </form>
+      <form action="{{ url_for('sair') }}" method="post"
+            onsubmit="return confirm('Close the Deposition Control browser app?')">
+        <button class="botao sair" title="Stop the program (closing the tab keeps it running)">Quit</button>
+      </form>
+    </div>
+  </header>
+  <div class="faixa"><b>BROWSER PREVIEW</b>read-only view of rastreabilidade.db — edit tasks in the desktop app</div>
+
+  <div class="corpo">
+    <aside class="lateral">
+      <div class="titulo-lateral">Status</div>
+      <ul class="arvore">
+        <li><a href="{{ url_for('lista') }}" class="{{ 'ativo' if request.endpoint == 'lista' and not st and lote is none and not interno }}">
+          <span class="rotulo">All tasks</span><span class="n">{{ total }}</span></a></li>
+        {% for s in STATUS_TODOS %}
+        <li><a href="{{ url_for('lista', status=s) }}" class="{{ 'ativo' if st == s }}">
+          <span class="rotulo">{{ s }}</span><span class="n">{{ contagem[s] }}</span></a></li>
+        {% endfor %}
+      </ul>
+
+      <div class="titulo-lateral">Batches</div>
+      <ul class="arvore">
+        {% for opto, g in arvore %}
+        <li>
+          <a href="{{ url_for('lista', lote=opto) }}" class="{{ 'ativo' if lote == opto and not interno }} {{ 'vazio' if not opto }}"
+             title="{{ opto or 'Tasks without a batch' }}">
+            <span class="rotulo"><span class="seta">{{ '▾' if g.internos else '▸' }}</span>{{ opto or 'No batch yet' }}</span>
+            <span class="n">{{ g.total }}</span></a>
+          {% if g.internos %}
+          <ul>
+            {% for cod, n in g.internos|dictsort %}
+            <li><a href="{{ url_for('lista', lote=opto, interno=cod) }}" class="{{ 'ativo' if interno == cod }}">
+              <span class="rotulo"><span class="seta">·</span>{{ cod }}</span><span class="n">{{ n }}</span></a></li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </aside>
+
+    <main class="conteudo">
+      {% block conteudo %}{% endblock %}
+      <div class="rodape">LEPTONS · Deposition Control System for DUNE · read at {{ agora }}</div>
+    </main>
+  </div>
+</body>
+</html>

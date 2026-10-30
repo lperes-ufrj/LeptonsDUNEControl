@@ -19,3 +19,12 @@ Notes
   so always launch from the project folder (the launch configs already do this).
 - The deposition program starts a small report server on port 8765 for the QR codes; allow it
   through the firewall if phones on the network need to open the links.
+
+Browser app (branch browser-app, preview)
+- Run and Debug > "Browser app" > F5, or in a terminal from the project folder:
+      .venv/bin/python leptons_web.py          (Linux/macOS)
+      .venv\Scripts\python leptons_web.py      (Windows)
+  It opens http://127.0.0.1:8780 in the default browser. Only this computer can open it.
+- For now it is read-only: it shows the task list and each run page from rastreabilidade.db.
+  Editing still happens in the desktop program, which keeps working as before.
+- Closing the browser tab does not stop it: use the Quit button (or Ctrl+C in the terminal).
