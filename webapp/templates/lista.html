@@ -41,8 +41,8 @@
   <table class="tabela-tarefas">
     <thead>
       <tr>
-        <th>Status</th><th>ID</th><th>PID</th><th>Run</th><th>Internal batch</th><th>Responsible</th>
-        <th>Deposition</th><th>Visual insp.</th><th>Cryogenic</th><th>Efficiency</th><th class="num">Missing</th>
+        <th>Status</th><th>ID</th><th>PID</th><th>Run</th><th>OPTO batch</th><th>Responsible</th>
+        <th>Deposition</th><th>Visual insp.</th><th>Cryogenic</th><th>Efficiency</th>
       </tr>
     </thead>
     <tbody>
@@ -53,7 +53,9 @@
         <td class="id"><a href="{{ link }}">{{ t.numero or '–' }}</a></td>
         <td class="mono">{{ t.pid or '–' }}</td>
         <td class="mono suave">{{ t.run or '–' }}</td>
-        <td class="mono">{% for l in t.lotes %}{{ l.interno or l.opto }}{% if not loop.last %}, {% endif %}{% else %}<span class="suave">–</span>{% endfor %}</td>
+        {% set optos = t.lotes|map(attribute='opto')|select|unique|list %}
+        {% set internos = t.lotes|map(attribute='interno')|select|list %}
+        <td class="mono"{% if internos %} title="Internal lot(s): {{ internos|join(', ') }}"{% endif %}>{{ optos|join(', ') if optos else '–' }}</td>
         <td>{{ t.responsavel or '–' }}</td>
         <td class="mono">{{ t.data or '–' }}</td>
         <td>
@@ -62,10 +64,9 @@
         </td>
         <td><span class="pill es-{{ t.imersao }}">{{ TXT_ESTADO[t.imersao] }}</span></td>
         <td><span class="pill es-{{ t.eficiencia }}">{{ TXT_ESTADO[t.eficiencia] }}</span></td>
-        <td class="num mono {{ 'suave' if not t.pendencias }}">{{ t.pendencias or '—' }}</td>
       </tr>
       {% else %}
-      <tr><td colspan="11" class="vazio-tabela">No sample matches this filter.</td></tr>
+      <tr><td colspan="10" class="vazio-tabela">No sample matches this filter.</td></tr>
       {% endfor %}
     </tbody>
   </table>
