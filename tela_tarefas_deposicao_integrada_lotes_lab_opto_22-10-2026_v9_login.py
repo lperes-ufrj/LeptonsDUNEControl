@@ -268,6 +268,14 @@ def inicializar_banco():
         )
     """)
 
+    # de onde veio cada filtro, quando a deposição usou mais de uma caixa / lote (preenchida no aplicativo do navegador)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS filtro_origem (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, id_tarefa INTEGER, filtro INTEGER, tipo_lote TEXT, lote_id INTEGER,
+            codigo_lote TEXT, lote_interno_id INTEGER, codigo_lote_interno TEXT
+        )
+    """)
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS eficiencia_teste (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1751,6 +1759,7 @@ def excluir_tarefa():
     cur.execute("DELETE FROM imersao_massas WHERE id_tarefa = ?", (tarefa_id,))
     cur.execute("DELETE FROM imersao_itens WHERE id_tarefa = ?", (tarefa_id,))
     cur.execute("DELETE FROM tarefa_lotes WHERE id_tarefa = ?", (tarefa_id,))
+    cur.execute("DELETE FROM filtro_origem WHERE id_tarefa = ?", (tarefa_id,))
     cur.execute("DELETE FROM eficiencia_teste WHERE id_tarefa = ?", (tarefa_id,))
     cur.execute("DELETE FROM eficiencia_amostras WHERE id_tarefa = ?", (tarefa_id,))
     cur.execute("DELETE FROM tarefas WHERE id = ?", (tarefa_id,))

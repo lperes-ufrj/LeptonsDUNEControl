@@ -41,6 +41,10 @@ Browser app (branch browser-app)
   Export CSV, and the Leptons cleaning lots (DUNE-LP-000X) with their PDF list. Each batch page lists the samples
   deposited from each box. Same audit codes (BATCH_CREATE/UPDATE/DELETE, CLEANING_LOT_SAVE/DELETE). Uploaded
   supplier files are copied to the "arquivos_lotes" folder.
+- When a sample uses more than one box or batch, the sample form shows a "Filter origin…" button: a window to say
+  which of the 28 filters came from which box/batch (type a range, e.g. 1–20 → box A, or pick each filter). The sample
+  page, the HTML report and the PDF show the ranges per box. Stored in the filtro_origem table (rastreabilidade.db);
+  the desktop program keeps it when it saves and removes it when it deletes the task.
 - Two user roles: Admin and Operator. Only an Admin manages users, reviews samples (QA sign-off) and sees
   the audit log.
 - Only an Admin can delete (samples, batches, cleaning lots), and must type their own password to confirm.

@@ -175,6 +175,39 @@ def entradas_gravadas(linhas, lote_id_legado=None, codigo_legado=None):
     return resultado
 
 
+def chave(e):
+    """Identifica uma entrada no formulário (a mesma chave do editar.js)."""
+    return "|".join("" if v is None else str(v) for v in (e.get("tipo"), e.get("lote_id"), e.get("codigo_lote"),
+                                                          e.get("interno_id")))
+
+
+def mesma_origem(linha, e):
+    """A linha gravada (tarefa_lotes ou filtro_origem) é desta entrada? Pelos IDs ou pelos códigos
+    (um .json de outro computador chega sem IDs)."""
+    if (linha.get("tipo_lote") or "opto") != (e.get("tipo") or "opto"):
+        return False
+    iid, icod = linha.get("lote_interno_id"), linha.get("codigo_lote_interno") or ""
+    if iid is not None or icod:
+        return (iid is not None and iid == e.get("interno_id")) or (bool(icod) and icod == (e.get("codigo_interno") or ""))
+    if e.get("interno_id") is not None or e.get("codigo_interno"):
+        return False
+    lid = linha.get("lote_id")
+    return (lid is not None and lid == e.get("lote_id")) or (linha.get("codigo_lote") or "") == (e.get("codigo_lote") or "")
+
+
+def faixas(numeros):
+    """[1, 2, 3, 5, 7, 8] -> '1–3, 5, 7–8'."""
+    partes, ns = [], sorted(set(numeros))
+    i = 0
+    while i < len(ns):
+        j = i
+        while j + 1 < len(ns) and ns[j + 1] == ns[j] + 1:
+            j += 1
+        partes.append(str(ns[i]) if i == j else f"{ns[i]}–{ns[j]}")
+        i = j + 1
+    return ", ".join(partes)
+
+
 def pids_que_usaram(con_tarefas, interno_id, ignorar_tarefa=None, tipo="opto"):
     """PIDs das deposições que já usaram este lote interno (ou lote de limpeza, com tipo='limpeza')."""
     if interno_id is None:

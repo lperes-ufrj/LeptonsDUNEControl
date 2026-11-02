@@ -287,7 +287,118 @@
     $("#info-lotes").textContent = escolhidos.length
       ? escolhidos.length + " selected   ·   " + txtInterno + "   ·   Total filters: " + (filtros.length ? filtros.reduce((a, b) => a + b, 0) : "–")
       : "No batch selected";
+    atualizarOrigem();
   }
+
+  // ---------------- origem de cada filtro (mais de uma caixa / lote) ----------------
+  const entradaOrigens = $("#origens_json");
+  const grade = $("#og-grade");
+  const dlgOrigem = $("#dlg-origem");
+  let origens = JSON.parse(entradaOrigens.value || "{}");      // {nº do filtro: chave do lote}
+  let rascunho = {};
+
+  const rotulo = (l) => l.codigo_interno ? l.codigo_interno + " (" + (l.codigo_lote || "–") + ")" : (l.codigo_lote || "–") + " (whole batch)";
+  const curto = (l) => l.codigo_interno || l.codigo_lote || "–";
+  // na grade os códigos não cabem: cada lote ganha uma letra (a mesma da legenda e da cor)
+  const letra = (i) => String.fromCharCode(65 + i);
+  const minimo = (l) => letra(escolhidos.indexOf(l)) + " · " + (l.codigo_interno ? l.codigo_interno.replace(/^DUNE-/, "") : "batch");
+  function faixas(ns) {
+    ns = [...ns].sort((a, b) => a - b);
+    const partes = [];
+    for (let i = 0; i < ns.length; i++) {
+      let j = i;
+      while (j + 1 < ns.length && ns[j + 1] === ns[j] + 1) j++;
+      partes.push(i === j ? String(ns[i]) : ns[i] + "–" + ns[j]);
+      i = j;
+    }
+    return partes.join(", ");
+  }
+  function porLote(mapa) {
+    const grupos = escolhidos.map(() => []);
+    const idx = new Map(escolhidos.map((l, i) => [chave(l), i]));
+    Object.entries(mapa).forEach(([n, k]) => { if (idx.has(k)) grupos[idx.get(k)].push(+n); });
+    return grupos;
+  }
+
+  function atualizarOrigem() {
+    const varios = escolhidos.length > 1;
+    const validas = new Set(escolhidos.map(chave));
+    Object.keys(origens).forEach((n) => { if (!varios || !validas.has(origens[n])) delete origens[n]; });
+    entradaOrigens.value = JSON.stringify(origens);
+    $("#abrir-origem").hidden = !varios;
+    const info = $("#info-origem");
+    info.hidden = !varios;
+    if (!varios) return;
+    const feitos = Object.keys(origens).length;
+    const grupos = porLote(origens);
+    info.className = "info-origem " + (feitos === N_FILTROS ? "sim" : "nao");
+    info.textContent = "Filter origin: " + (feitos ? feitos + "/" + N_FILTROS + " assigned   ·   " +
+      escolhidos.map((l, i) => grupos[i].length ? curto(l) + ": " + faixas(grupos[i]) : "").filter(Boolean).join("   ·   ")
+      : "not assigned yet – click Filter origin…");
+  }
+
+  function desenharOrigem() {
+    const grupos = porLote(rascunho);
+    $("#og-legenda").innerHTML = escolhidos.map((l, i) => {
+      const caixa = l.filtros != null ? " of " + l.filtros + " in the box" : "";
+      const demais = l.filtros != null && grupos[i].length > l.filtros;
+      return "<span class='chip-origem cor-" + (i % 6) + "'><b class='letra'>" + letra(i) + "</b> <b>" + esc(rotulo(l)) + "</b> · " +
+        grupos[i].length + " filter(s)" + caixa + (demais ? " <span class='nao'>– more than the box had</span>" : "") + "</span>";
+    }).join("");
+    const opcoes = "<option value=''>–</option>" + escolhidos.map((l, i) => "<option value='" + i + "'>" + esc(minimo(l)) + "</option>").join("");
+    const sel = $("#og-lote"), antes = sel.value;
+    sel.innerHTML = escolhidos.map((l, i) => "<option value='" + i + "'>" + letra(i) + " · " + esc(rotulo(l)) + "</option>").join("");
+    if (antes && +antes < escolhidos.length) sel.value = antes;
+    grade.innerHTML = "";
+    const idx = new Map(escolhidos.map((l, i) => [chave(l), i]));
+    for (let n = 1; n <= N_FILTROS; n++) {
+      const i = idx.has(rascunho[n]) ? idx.get(rascunho[n]) : -1;
+      const cel = document.createElement("label");
+      cel.className = "celula-origem" + (i >= 0 ? " cor-" + (i % 6) : " vazia");
+      cel.innerHTML = "<span class='mono'>" + String(n).padStart(2, "0") + "</span><select>" + opcoes + "</select>";
+      const s = $("select", cel);
+      s.value = i >= 0 ? String(i) : "";
+      s.addEventListener("change", () => {
+        if (s.value === "") delete rascunho[n];
+        else rascunho[n] = chave(escolhidos[+s.value]);
+        desenharOrigem();
+      });
+      grade.appendChild(cel);
+    }
+    const feitos = Object.keys(rascunho).length;
+    $("#og-estado").textContent = feitos + "/" + N_FILTROS + " filters assigned";
+    $("#og-estado").className = feitos === N_FILTROS ? "sim" : "nao";
+  }
+
+  $("#abrir-origem").addEventListener("click", () => {
+    rascunho = { ...origens };
+    $("#og-de").value = 1;
+    $("#og-ate").value = N_FILTROS;
+    desenharOrigem();
+    dlgOrigem.showModal();
+  });
+  $("#og-aplicar").addEventListener("click", () => {
+    let de = parseInt($("#og-de").value, 10), ate = parseInt($("#og-ate").value, 10);
+    if (!(de >= 1 && ate >= 1)) { alert("Enter the first and the last filter (1 to " + N_FILTROS + ")."); return; }
+    if (de > ate) [de, ate] = [ate, de];
+    const l = escolhidos[+$("#og-lote").value];
+    for (let n = Math.max(1, de); n <= Math.min(N_FILTROS, ate); n++) rascunho[n] = chave(l);
+    // a próxima faixa começa logo depois desta, já no lote seguinte
+    if (ate < N_FILTROS) {
+      $("#og-de").value = ate + 1;
+      $("#og-ate").value = N_FILTROS;
+      $("#og-lote").value = String(Math.min(+$("#og-lote").value + 1, escolhidos.length - 1));
+    }
+    desenharOrigem();
+  });
+  $("#og-limpar").addEventListener("click", () => { rascunho = {}; desenharOrigem(); });
+  $("#og-ok").addEventListener("click", () => {
+    if (JSON.stringify(rascunho) !== JSON.stringify(origens)) marcarAlterado();
+    origens = rascunho;
+    atualizarOrigem();
+    dlgOrigem.close();
+  });
+  $$("[data-fechar]", dlgOrigem).forEach((b) => b.addEventListener("click", () => dlgOrigem.close()));
 
   // ---------------- janela: escolher lote ----------------
   const dlg = $("#seletor-lotes");

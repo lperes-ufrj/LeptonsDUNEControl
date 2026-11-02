@@ -84,7 +84,7 @@ def amostra_eficiencia(r):
 def vazio(responsavel=""):
     """Tarefa nova: data de hoje e o usuário logado como responsável."""
     return {
-        "id": None, "lotes": [], "run": "", "data": hoje(), "pid": "", "pid_p02": "", "pid_p03": "", "pid_p14": "",
+        "id": None, "lotes": [], "origens": {}, "run": "", "data": hoje(), "pid": "", "pid_p02": "", "pid_p03": "", "pid_p14": "",
         "posicao": "", "responsavel": responsavel, "tipo": "Substrate", "obs": "", "anexos": [],
         "massas": {p: {"antes": "", "depois": ""} for p in POSICOES}, "massa_ptp": "", "lote_ptp": "",
         "insp": {k: "" for k in CAMPOS_INSPECAO},
@@ -112,6 +112,11 @@ def de_conexao(con, tarefa_id):
     f["id"] = tarefa_id
     linhas_lotes = [dict(r) for r in con.execute("SELECT * FROM tarefa_lotes WHERE id_tarefa = ? ORDER BY id", (tarefa_id,))]
     f["lotes"] = lotes.entradas_gravadas(linhas_lotes, t.get("lote_entrada_id"), t.get("codigo_lote"))
+    # de onde veio cada filtro (só com mais de um lote): {nº do filtro: índice em f["lotes"]}
+    for r in con.execute("SELECT * FROM filtro_origem WHERE id_tarefa = ? ORDER BY filtro", (tarefa_id,)):
+        i = next((i for i, e in enumerate(f["lotes"]) if lotes.mesma_origem(dict(r), e)), None)
+        if i is not None and r["filtro"] in range(1, dados.N_FILTROS + 1):
+            f["origens"][r["filtro"]] = i
     f.update(data=_txt(t.get("data_inicio")), pid=_txt(t.get("codigo_tarefa")), posicao=_txt(t.get("position_range")),
              responsavel=_txt(t.get("responsavel")), obs=_txt(t.get("observacoes")),
              tipo=banco.TIPOS_ANTIGOS.get(t.get("descricao"), t.get("descricao")) or "Substrate",
@@ -169,6 +174,13 @@ def de_formulario(form):
         f["lotes"] = [l for l in json.loads(form.get("lotes_json") or "[]") if isinstance(l, dict)]
     except ValueError:
         f["lotes"] = []
+    try:
+        brutas = json.loads(form.get("origens_json") or "{}")
+    except ValueError:
+        brutas = {}
+    indice = {lotes.chave(l): i for i, l in enumerate(f["lotes"])}
+    f["origens"] = {int(n): indice[k] for n, k in (brutas.items() if isinstance(brutas, dict) else ())
+                    if str(n).isdigit() and 1 <= int(n) <= dados.N_FILTROS and k in indice}
     for k in ("run", "data", "pid", "pid_p02", "pid_p03", "pid_p14", "posicao", "responsavel", "obs",
               "massa_ptp", "lote_ptp"):
         f[k] = g(k)
@@ -287,7 +299,7 @@ def gravar(f, tarefa_id=None):
         else:
             cur.execute(f"UPDATE tarefas SET {', '.join(k + ' = ?' for k in valores)} WHERE id = ?",
                         (*valores.values(), tarefa_id))
-        for tabela in ("tarefa_lotes", "massa_posicoes", "inspecao_visual_cab", "inspecao_visual_filtros",
+        for tabela in ("tarefa_lotes", "filtro_origem", "massa_posicoes", "inspecao_visual_cab", "inspecao_visual_filtros",
                        "imersao_massas", "imersao_itens", "eficiencia_teste", "eficiencia_amostras"):
             cur.execute(f"DELETE FROM {tabela} WHERE id_tarefa = ?", (tarefa_id,))
 
@@ -296,6 +308,13 @@ def gravar(f, tarefa_id=None):
                         "tipo_lote) VALUES (?, ?, ?, ?, ?, ?)",
                         (tarefa_id, l.get("lote_id"), l.get("codigo_lote"), l.get("interno_id"),
                          l.get("codigo_interno") or None, "limpeza" if l.get("tipo") == "limpeza" else "opto"))
+        if len(lotes_sel) > 1:            # com um lote só, todos os filtros vêm dele
+            for n, i in sorted(f["origens"].items()):
+                l = lotes_sel[i]
+                cur.execute("INSERT INTO filtro_origem (id_tarefa, filtro, tipo_lote, lote_id, codigo_lote, lote_interno_id, "
+                            "codigo_lote_interno) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            (tarefa_id, n, "limpeza" if l.get("tipo") == "limpeza" else "opto", l.get("lote_id"),
+                             l.get("codigo_lote"), l.get("interno_id"), l.get("codigo_interno") or None))
         for p, m in f["massas"].items():
             cur.execute("INSERT INTO massa_posicoes (id_tarefa, posicao, massa_antes, massa_depois, densidade_massa_ug_cm2) "
                         "VALUES (?, ?, ?, ?, ?)", (tarefa_id, p, m["antes"], m["depois"], densidade_massa(m["antes"], m["depois"])))
@@ -389,7 +408,7 @@ def limpar_revisao(tarefa_id):
 # ---------------- exportar / importar (.json) ----------------
 FORMATO_JSON = "leptons-deposition-task"
 # tabelas ligadas à tarefa por id_tarefa (a linha da própria tarefa fica em "task")
-TABELAS_TAREFA = ["tarefa_lotes", "massa_posicoes", "inspecao_visual_cab", "inspecao_visual_filtros",
+TABELAS_TAREFA = ["tarefa_lotes", "filtro_origem", "massa_posicoes", "inspecao_visual_cab", "inspecao_visual_filtros",
                   "imersao_massas", "imersao_itens", "eficiencia_teste", "eficiencia_amostras"]
 
 
@@ -463,7 +482,7 @@ def formulario_do_json(d):
         for tab in TABELAS_TAREFA:
             for linha in (d.get("tables") or {}).get(tab) or []:
                 linha = dict(linha, id_tarefa=1)
-                if tab == "tarefa_lotes":
+                if tab in ("tarefa_lotes", "filtro_origem"):
                     linha.update(lote_id=None, lote_interno_id=None)
                 inserir(tab, linha)
         f = de_conexao(mem, 1)

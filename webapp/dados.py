@@ -336,6 +336,23 @@ def listar_tarefas():
     return tarefas
 
 
+def _origem_filtros(conn, tarefa_id):
+    """{nº do filtro: {tipo, opto, interno}} gravados na janela Filter origin (códigos atuais dos lotes internos)."""
+    internos, limpezas = codigos_lotes_internos()
+    try:
+        linhas = conn.execute("SELECT filtro, tipo_lote, codigo_lote, lote_interno_id, codigo_lote_interno "
+                              "FROM filtro_origem WHERE id_tarefa = ?", (tarefa_id,)).fetchall()
+    except sqlite3.OperationalError:            # banco ainda sem a tabela
+        return {}
+    origem = {}
+    for r in linhas:
+        tipo = r["tipo_lote"] or "opto"
+        codigos = limpezas if tipo == "limpeza" else internos
+        origem[r["filtro"]] = {"tipo": tipo, "opto": "Leptons cleaning" if tipo == "limpeza" else (r["codigo_lote"] or ""),
+                               "interno": codigos.get(r["lote_interno_id"]) or r["codigo_lote_interno"] or ""}
+    return origem
+
+
 def ler_tarefa(tarefa_id):
     """Tudo de uma tarefa, com os estados e as pendências já calculados; None se não existir."""
     conn = _conectar(DB_TAREFAS)
@@ -344,11 +361,17 @@ def ler_tarefa(tarefa_id):
         if t is None:
             return None
         d = _dados_tarefa(conn, dict(t), _lotes_por_tarefa(conn).get(tarefa_id, []))
+        origem = _origem_filtros(conn, tarefa_id)
     finally:
         conn.close()
     opto = lotes_opto()
     for l in d["lotes"]:
         l.update({k: v for k, v in (opto.get(l["opto"]) or {}).items() if k != "lote"})
+    # de onde veio cada filtro: só conta com mais de um lote (com um lote só, todos vêm dele)
+    for l in d["lotes"]:
+        l["filtros_origem"] = sorted(n for n, o in origem.items() if len(d["lotes"]) > 1
+                                     and (o["tipo"], o["opto"], o["interno"]) == (l["tipo"], l["opto"], l["interno"]))
+    d["sem_origem"] = (N_FILTROS - sum(len(l["filtros_origem"]) for l in d["lotes"])) if len(d["lotes"]) > 1 else 0
     d["pendencias"] = pendencias(d)
     d["status"] = status(d, d["pendencias"])
     d["numero"] = numero_run(d["cab"].get("run_evaporation"))

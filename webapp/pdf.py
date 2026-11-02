@@ -175,13 +175,23 @@ def gerar_pdf_relatorio(tarefa_id, caminho):
 
     # lotes
     story.append(Paragraph("Batches", est_h3))
-    linhas_l = [[H("OPTO Batch"), H("Internal Lot"), H("Arrival / Cleaned"), H("Company"), H("Filters")]]
-    for l in d["lotes"]:
-        linhas_l.append([P(l["interno"]), P(l.get("lote_interno")), P(l["chegada"]),
-                         P(l["empresa"]), P(l["filtros"])])
-    if len(linhas_l) == 1:
-        linhas_l.append([P("-")] * 5)
-    story.append(tabela(linhas_l, [40, 40, 36, 50, 20]))
+    if len(d["lotes"]) > 1:            # vários lotes: de onde veio cada filtro
+        linhas_l = [[H("OPTO Batch"), H("Internal Lot"), H("Arrival / Cleaned"), H("Company"), H("Filters"),
+                     H("Used for filters")]]
+        for l in d["lotes"]:
+            linhas_l.append([P(l["interno"]), P(l.get("lote_interno")), P(l["chegada"]),
+                             P(l["empresa"]), P(l["filtros"]), P(l.get("posicoes") or "-")])
+        story.append(tabela(linhas_l, [34, 34, 30, 40, 16, 32]))
+        if d.get("sem_origem"):
+            story.append(Paragraph(f"{d['sem_origem']} filter(s) without origin.", est_nota))
+    else:
+        linhas_l = [[H("OPTO Batch"), H("Internal Lot"), H("Arrival / Cleaned"), H("Company"), H("Filters")]]
+        for l in d["lotes"]:
+            linhas_l.append([P(l["interno"]), P(l.get("lote_interno")), P(l["chegada"]),
+                             P(l["empresa"]), P(l["filtros"])])
+        if len(linhas_l) == 1:
+            linhas_l.append([P("-")] * 5)
+        story.append(tabela(linhas_l, [40, 40, 36, 50, 20]))
 
     # massas por posição
     story.append(Paragraph("Mass control by position", est_h3))

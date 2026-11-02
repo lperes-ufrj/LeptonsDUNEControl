@@ -63,6 +63,9 @@ def inicializar_banco():
             id INTEGER PRIMARY KEY AUTOINCREMENT, id_tarefa INTEGER, item TEXT, aprovado TEXT);
         CREATE TABLE IF NOT EXISTS tarefa_lotes (
             id INTEGER PRIMARY KEY AUTOINCREMENT, id_tarefa INTEGER, lote_id INTEGER, codigo_lote TEXT);
+        CREATE TABLE IF NOT EXISTS filtro_origem (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, id_tarefa INTEGER, filtro INTEGER, tipo_lote TEXT, lote_id INTEGER,
+            codigo_lote TEXT, lote_interno_id INTEGER, codigo_lote_interno TEXT);
         CREATE TABLE IF NOT EXISTS eficiencia_teste (
             id INTEGER PRIMARY KEY AUTOINCREMENT, id_tarefa INTEGER, data_teste TEXT, ref_id TEXT, ref_data TEXT,
             temperatura_c TEXT, umidade_pct TEXT, supervisor TEXT, data_revisao TEXT, revisado TEXT,
@@ -99,7 +102,7 @@ INDICES = {
     "rastreabilidade.db": [("massa_posicoes", "id_tarefa"), ("inspecao_visual_cab", "id_tarefa"),
                            ("inspecao_visual_filtros", "id_tarefa"), ("imersao_massas", "id_tarefa"),
                            ("imersao_itens", "id_tarefa"), ("tarefa_lotes", "id_tarefa"),
-                           ("eficiencia_teste", "id_tarefa"), ("eficiencia_amostras", "id_tarefa")],
+                           ("filtro_origem", "id_tarefa"), ("eficiencia_teste", "id_tarefa"), ("eficiencia_amostras", "id_tarefa")],
     "lotes.db": [("lotes_internos", "id_lote")],
 }
 

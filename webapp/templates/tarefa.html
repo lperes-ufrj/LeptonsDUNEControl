@@ -82,7 +82,9 @@
     <dt>Filter type</dt><dd>{{ t.descricao|ou_traco }}</dd>
     <dt>PTP</dt><dd>{{ t.massa_ptp_g|num }}{% if t.massa_ptp_g %} g{% endif %} &nbsp;·&nbsp; batch {{ t.lote_ptp|ou_traco }}</dd>
     <dt>Batches</dt>
-    <dd class="largo">{% for l in d.lotes %}{{ l.opto or '–' }}{% if l.interno %} › {{ l.interno }}{% endif %}{% if l.empresa %} <span class="suave">({{ l.empresa }}{% if l.chegada %}, arrived {{ l.chegada }}{% endif %})</span>{% endif %}{% if not loop.last %}<br>{% endif %}{% else %}–{% endfor %}</dd>
+    <dd class="largo">{% for l in d.lotes %}{% if d.lotes|length > 1 %}<span class="chip-origem cor-{{ loop.index0 % 6 }}">{% endif %}{{ l.opto or '–' }}{% if l.interno %} › {{ l.interno }}{% endif %}{% if d.lotes|length > 1 %}</span>{% endif %}{% if l.empresa %} <span class="suave">({{ l.empresa }}{% if l.chegada %}, arrived {{ l.chegada }}{% endif %})</span>{% endif %}
+      {%- if d.lotes|length > 1 %} · {% if l.filtros_origem %}filters <b class="mono">{{ l.filtros_origem|faixas }}</b> ({{ l.filtros_origem|length }}){% else %}<span class="suave">no filter assigned</span>{% endif %}{% endif %}{% if not loop.last %}<br>{% endif %}{% else %}–{% endfor %}
+      {%- if d.sem_origem %}<div class="nao pequeno">{{ d.sem_origem }} of {{ dados.N_FILTROS }} filters without origin – use <b>Edit sample › Filter origin…</b></div>{% endif %}</dd>
     {% if t.observacoes %}<dt>Observations</dt><dd class="largo texto">{{ t.observacoes }}</dd>{% endif %}
     {% if anexos %}<dt>Attached files</dt><dd class="largo texto">
       {% for a in anexos %}<a href="{{ url_for('anexo', tarefa_id=d.id, file=a) }}" target="_blank">{{ a|basename }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</dd>{% endif %}

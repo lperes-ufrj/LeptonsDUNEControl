@@ -64,10 +64,15 @@ def coletar_dados_relatorio(tarefa_id):
         linhas = [dict(r) for r in con.execute("SELECT * FROM tarefa_lotes WHERE id_tarefa = ? ORDER BY id", (tarefa_id,))]
     finally:
         con.close()
+    # as duas listas vêm de tarefa_lotes na mesma ordem: a origem dos filtros segue pela posição
+    origem = [l.get("filtros_origem") or [] for l in d["lotes"]]
+    entradas = lotes.entradas_gravadas(linhas, t.get("lote_entrada_id"), t.get("codigo_lote"))
+    if len(origem) != len(entradas):
+        origem = [[] for _ in entradas]
     d["lotes"] = [{"interno": e["codigo_lote"], "chegada": e["chegada"], "empresa": e["empresa"], "lote_empresa": "",
                    "lote_interno": e["codigo_interno"], "filtros": "" if e["filtros"] is None else e["filtros"],
-                   "tipo": e["tipo"]}
-                  for e in lotes.entradas_gravadas(linhas, t.get("lote_entrada_id"), t.get("codigo_lote"))]
+                   "tipo": e["tipo"], "posicoes": lotes.faixas(o)}
+                  for e, o in zip(entradas, origem)]
     d["massas"] = [{"posicao": p, "massa_antes": m.get("massa_antes"), "massa_depois": m.get("massa_depois"),
                     "densidade_massa_ug_cm2": m.get("densidade_massa_ug_cm2")} for p, m in sorted(d["massas"].items())]
     d["im_obs"] = t.get("imersao_observacoes") or ""
@@ -193,8 +198,11 @@ def _bloco_info(d):
         + (" &nbsp;|&nbsp; " + ("cleaned on " if l.get("tipo") == "limpeza" else "arrival ") + _esc(l["chegada"])
            if l["chegada"] else "")
         + (" &nbsp;|&nbsp; " + _esc(l["filtros"]) + " filters" if l["filtros"] not in ("", None) else "")
+        + (" &nbsp;|&nbsp; <b>used for filters " + _esc(l["posicoes"]) + "</b>" if l.get("posicoes") else "")
         for l in d["lotes"]
     ) or "-"
+    if d.get("sem_origem"):
+        lotes_txt += "<br><i>" + str(d["sem_origem"]) + " filter(s) without origin</i>"
 
     linhas = [
         (_celula_campo("BOX PID", t.get("codigo_tarefa")), _celula_campo("DEPOSITION DATE", t.get("data_inicio"))),
@@ -426,6 +434,7 @@ def pagina_menu(d):
     completos, cont, algum = resumo_visual_dados(d)
     lotes_txt = ", ".join(
         _esc(l["interno"]) + (" / " + _esc(l.get("lote_interno")) if l.get("lote_interno") else "")
+        + (" (filters " + _esc(l["posicoes"]) + ")" if l.get("posicoes") else "")
         for l in d["lotes"] if l["interno"]) or "-"
 
     resumo = (

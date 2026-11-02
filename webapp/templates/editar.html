@@ -26,6 +26,7 @@
   <input type="hidden" name="tarefa_id" value="{{ f.id or '' }}">
   <input type="hidden" name="importacao" value="{{ importacao }}">
   <input type="hidden" name="lotes_json" id="lotes_json" value="{{ lotes_json }}">
+  <input type="hidden" name="origens_json" id="origens_json" value="{{ origens_json }}">
   <input type="hidden" name="confirmar_revisao" value="">
   {% for k, v in f.legado.items() %}<input type="hidden" name="legado_{{ k }}" value="{{ v }}">{% endfor %}
 
@@ -69,8 +70,11 @@
             <tbody id="lotes-sel"></tbody>
           </table>
           <div class="info-lotes" id="info-lotes">No batch selected</div>
+          <div class="info-origem" id="info-origem" hidden></div>
           <div class="linha-botoes">
             <button type="button" class="botao" id="abrir-seletor">Add batch / internal lot…</button>
+            <button type="button" class="botao" id="abrir-origem" hidden
+                    title="The filters of this deposition came from more than one box or batch: assign where each filter came from">Filter origin…</button>
             <a class="botao" href="{{ url_for('lote_novo') }}" target="_blank" title="Opens the Batches tab in a new browser tab. After registering the batch, use “Add batch / internal lot…” again.">Register a new batch ↗</a>
           </div>
         </div>
@@ -304,6 +308,26 @@
   <div class="dialogo-rodape"><span class="nao" id="sl-aviso"></span>
     <button type="button" class="botao primario" id="sl-adicionar">Add selected</button>
     <button type="button" class="botao" data-fechar>Done</button></div>
+</dialog>
+
+{# ======================= JANELA: ORIGEM DE CADA FILTRO ======================= #}
+<dialog id="dlg-origem" class="dialogo medio">
+  <div class="dialogo-topo"><h2>Filter origin</h2><button type="button" class="x" data-fechar>✕</button></div>
+  <div class="dialogo-corpo">
+    <p class="suave">This deposition used more than one box or batch. Choose where each of the {{ dados.N_FILTROS }} filters came from:
+      type a range below, or pick each filter in the grid.</p>
+    <div class="origem-legenda" id="og-legenda"></div>
+    <div class="origem-faixa">
+      Filters <input id="og-de" class="num" inputmode="numeric" value="1"> to <input id="og-ate" class="num" inputmode="numeric" value="{{ dados.N_FILTROS }}">
+      come from <select id="og-lote"></select>
+      <button type="button" class="botao" id="og-aplicar">Apply</button>
+      <button type="button" class="botao" id="og-limpar">Clear all</button>
+    </div>
+    <div class="origem-grade" id="og-grade"></div>
+  </div>
+  <div class="dialogo-rodape"><span id="og-estado" class="suave"></span>
+    <button type="button" class="botao" data-fechar>Cancel</button>
+    <button type="button" class="botao primario" id="og-ok">Done</button></div>
 </dialog>
 
 <script src="{{ url_for('static', filename='editar.js') }}"></script>

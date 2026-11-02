@@ -113,6 +113,8 @@ def criar_app():
     def ou_traco(valor):
         return valor if str(valor or "").strip() else "–"
 
+    app.template_filter("faixas")(lotes.faixas)
+
     @app.template_filter("basename")
     def basename(caminho):
         return os.path.basename(str(caminho).replace("\\", "/"))
@@ -212,7 +214,9 @@ def criar_app():
         return render_template("editar.html", f=f, dados=dados, tarefas=tarefas, erros=erros, avisos=avisos,
                                importacao=importacao, confirmar_run=confirmar_run, revisada=revisada,
                                numero=id_mostrado(f["id"]) if f["id"] else "",
-                               lotes_json=json.dumps(f["lotes"]))
+                               lotes_json=json.dumps(f["lotes"]),
+                               origens_json=json.dumps({n: lotes.chave(f["lotes"][i]) for n, i in f["origens"].items()
+                                                        if i < len(f["lotes"])}))
 
     @app.route("/sample/new")
     def nova_tarefa():

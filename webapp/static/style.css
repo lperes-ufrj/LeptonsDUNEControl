@@ -27,6 +27,8 @@
   --sans: "Inter", "Segoe UI", system-ui, -apple-system, Ubuntu, Roboto, "Helvetica Neue", sans-serif;
   --mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
 }
+/* o atributo hidden vale mesmo em elementos com display próprio (ex.: .botao é inline-flex) */
+[hidden] { display: none !important; }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; }
@@ -464,3 +466,26 @@ a.pill:hover { filter: brightness(.95); text-decoration: underline; }
 .barra-acoes .botao.direita { margin-left: auto; }
 .botao.perigo-cheio { background: var(--vermelho); border-color: var(--vermelho); color: #fff; }
 .botao.perigo-cheio:hover { background: #a91f1f; border-color: #a91f1f; color: #fff; }
+
+/* origem de cada filtro: uma cor por caixa / lote */
+.dialogo.medio { width: min(820px, calc(100vw - 32px)); }
+.info-origem { font-size: 13px; font-weight: 600; margin-top: 4px; }
+.origem-legenda { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 10px; }
+.chip-origem { font-size: 12px; padding: 3px 8px; border-radius: 6px; border-left: 4px solid var(--og); background: var(--og-fundo); }
+.origem-faixa { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; margin-bottom: 12px; }
+.origem-faixa input { width: 56px; }
+.origem-faixa select { max-width: 300px; }
+.origem-grade { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px; }
+.celula-origem { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border: 1px solid var(--borda);
+  border-left: 4px solid var(--og, var(--borda-forte)); border-radius: 6px; background: var(--og-fundo, #fff); font-size: 12px; }
+.celula-origem > span { min-width: 22px; }
+.celula-origem select { flex: 1; min-width: 0; font-size: 12px; padding: 2px 4px; }
+.celula-origem.vazia { border-style: dashed; border-left-style: solid; }
+.cor-0 { --og: #8a9100; --og-fundo: #f4f6d9; }
+.cor-1 { --og: #1565c0; --og-fundo: #e8f0fb; }
+.cor-2 { --og: #ef6c00; --og-fundo: #fff2e3; }
+.cor-3 { --og: #7b3fa0; --og-fundo: #f3eaf8; }
+.cor-4 { --og: #00897b; --og-fundo: #e2f4f2; }
+.cor-5 { --og: #c2185b; --og-fundo: #fbe7ef; }
+.origem-faixas { margin: 2px 0 0; padding: 0; list-style: none; font-size: 13px; }
+.chip-origem .letra { display: inline-block; min-width: 16px; text-align: center; color: #fff; background: var(--og); border-radius: 4px; padding: 0 3px; }
