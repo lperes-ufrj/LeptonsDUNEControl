@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from tkinter import filedialog, messagebox, ttk
 
 DB_USUARIOS = "usuarios.db"
-PERFIS = ("Admin", "Operator", "Supervisor/QA")
+PERFIS = ("Admin", "Operator")
 ITERACOES = 600_000          # custo do PBKDF2 (dificulta adivinhar senhas se o arquivo vazar)
 MIN_SENHA = 8
 MAX_FALHAS = 5               # tentativas erradas seguidas antes de bloquear
@@ -72,6 +72,13 @@ def criar_tabelas():
                 detalhe TEXT
             )""")
         con.execute("CREATE INDEX IF NOT EXISTS idx_auditoria_quando ON auditoria(quando)")
+        # perfis que não existem mais (ex.: Supervisor/QA) viram Operator; um Admin pode promover depois
+        marcas = ", ".join("?" * len(PERFIS))
+        for username, nome, perfil in con.execute(
+                f"SELECT username, nome, perfil FROM usuarios WHERE perfil NOT IN ({marcas})", PERFIS).fetchall():
+            con.execute("INSERT INTO auditoria (quando, usuario, nome, programa, acao, detalhe) VALUES (?, ?, ?, ?, ?, ?)",
+                        (_agora(), username, nome, "system", "ROLE_MIGRATED", f"{perfil} -> Operator"))
+        con.execute(f"UPDATE usuarios SET perfil = 'Operator' WHERE perfil NOT IN ({marcas})", PERFIS)
         con.commit()
     finally:
         con.close()

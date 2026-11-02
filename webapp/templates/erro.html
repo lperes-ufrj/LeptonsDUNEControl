@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block titulo %}Not found{% endblock %}
+{% block titulo %}Error{% endblock %}
 {% block conteudo %}
-<div class="trilha"><a href="{{ url_for('lista') }}">All tasks</a></div>
-<div class="cartao"><h2>{{ mensagem }}</h2><a href="{{ url_for('lista') }}">Back to the task list</a></div>
+<div class="trilha"><a href="{{ url_for('lista') }}">All samples</a></div>
+<div class="cartao"><h2>{{ mensagem }}</h2><a href="{{ url_for('lista') }}">Back to the sample list</a></div>
 {% endblock %}

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block titulo %}Sync Leptons Control Sheet{% endblock %}
+{% block conteudo %}
+<div class="trilha"><a href="{{ url_for('lista') }}">All samples</a><span class="sep">›</span><b>Sync Leptons Control Sheet</b></div>
+{% if erro %}<div class="aviso-flash erro">{{ erro }}</div>{% endif %}
+<div class="cartao">
+  <h2>Sync Leptons Control Sheet</h2>
+  <p>Compares the <b>Deposition Control</b> and <b>Efficiency Test</b> tabs of DUNE_Control.xlsx with every saved sample (matched by
+    run, e.g. DUNE_EVAP_#0002#) and shows only what changed before applying.</p>
+  <form method="post" enctype="multipart/form-data" class="form-sync">
+    <label class="bloco-texto">Upload the spreadsheet
+      <input type="file" name="arquivo" accept=".xlsx,.xlsm"></label>
+    <div class="ou">or</div>
+    <label class="bloco-texto">Read it from this computer (path)
+      <input name="caminho" value="{{ ultimo }}" placeholder="/home/…/DUNE_Control.xlsx"></label>
+    <p class="nota">The path is remembered for the next sync. An uploaded file is used only once.</p>
+    <button class="botao primario">Compare</button>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block titulo %}Review run {{ d.numero or '–' }}{% endblock %}
+{% block conteudo %}
+{% set completos, cont, _ = d.visual %}
+<div class="trilha"><a href="{{ url_for('lista') }}">All samples</a><span class="sep">›</span>
+  <a href="{{ url_for('tarefa', tarefa_id=d.id) }}">Run {{ d.numero or '–' }}</a><span class="sep">›</span><b>Review</b></div>
+
+<div class="caixa-status st-{{ d.status|lower|replace(' ', '-') }}">
+  <div class="titulo-status">{{ d.status }}</div>
+  <div>{% if d.status == 'Incomplete' %}Missing information – complete the sample before it can be reviewed.
+    {% elif d.status == 'To be reviewed' %}All the information is filled. Check it in the report, then click Reviewed.
+    {% else %}Reviewed by {{ t.qa_signoff_por }} on {{ t.qa_signoff_data or '-' }}.{% endif %}</div>
+</div>
+
+<div class="cartao">
+  <dl class="chaves">
+    <dt>PID</dt><dd>{{ t.codigo_tarefa|ou_traco }}</dd>
+    <dt>Run evaporation</dt><dd>{{ d.cab.run_evaporation|ou_traco }}</dd>
+    <dt>Deposition date</dt><dd>{{ t.data_inicio|ou_traco }}</dd>
+    <dt>Responsible</dt><dd>{{ t.responsavel|ou_traco }}</dd>
+    <dt>Batches</dt><dd class="largo">{% for l in d.lotes %}{{ l.interno or l.opto }}{% if not loop.last %}, {% endif %}{% else %}–{% endfor %}</dd>
+    <dt>Visual inspection</dt><dd class="largo">{{ completos }}/{{ N_FILTROS }} classified – A: {{ cont.A }}  B: {{ cont.B }}  C: {{ cont.C }}</dd>
+    <dt>Cryogenic immersion</dt><dd><span class="pill es-{{ d.estado_imersao }}">{{ TXT_ESTADO[d.estado_imersao] }}</span></dd>
+    <dt>Optical efficiency</dt><dd><span class="pill es-{{ d.estado_eficiencia }}">{{ TXT_ESTADO[d.estado_eficiencia] }}</span></dd>
+    <dt>Batch decision</dt><dd class="largo"><b>{{ d.decisao }}</b></dd>
+  </dl>
+</div>
+
+{% if d.pendencias %}
+<div class="cartao"><h2 class="nao">Missing information ({{ d.pendencias|length }})</h2>
+  <ul class="lista-pendencias">{% for p in d.pendencias %}<li>{{ p }}</li>{% endfor %}</ul></div>
+{% endif %}
+
+<div class="barra-acoes">
+  <a class="botao" href="{{ url_for('relatorio_html', tarefa_id=d.id) }}" target="_blank">Open report</a>
+  <a class="botao" href="{{ url_for('relatorio_pdf', tarefa_id=d.id) }}" target="_blank">Print report (PDF)</a>
+  <a class="botao" href="{{ url_for('tarefa', tarefa_id=d.id) }}">Close</a>
+  <form method="post" class="direita"
+        onsubmit="return confirm('Mark sample {{ t.codigo_tarefa or '' }} as reviewed?\n\nFinal QA Sign-Off by: {{ nome }}\nDate: {{ hoje }}')">
+    <button class="botao primario" {{ 'disabled' if d.status != 'To be reviewed' or not pode_revisar }}>✔ Reviewed</button>
+  </form>
+</div>
+{% if d.status == 'To be reviewed' and not pode_revisar %}
+<p class="nota" style="text-align: right">Only {{ perfis|join(' or ') }} users can mark a sample as reviewed.</p>
+{% endif %}
+{% endblock %}

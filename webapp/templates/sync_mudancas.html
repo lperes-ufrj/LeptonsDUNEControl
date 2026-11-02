@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block titulo %}Sync – changes{% endblock %}
+{% block conteudo %}
+<div class="trilha"><a href="{{ url_for('lista') }}">All samples</a><span class="sep">›</span>
+  <a href="{{ url_for('sincronizar') }}">Sync Leptons Control Sheet</a><span class="sep">›</span><b>Changes</b></div>
+<div class="cabecalho"><div>
+  <h1>Changes from {{ arquivo }}</h1>
+  <div class="sub">{{ abas|join(', ') }} – {{ n_tarefas }} saved samples checked · {{ n_exist }} change(s) in {{ existentes }} existing
+    sample(s); {{ novas }} run(s) not in the app yet. Only the fields that differ are listed.</div>
+</div></div>
+<p class="nota">The sheet never erases saved values: empty cells are ignored, Position and Observations are only filled when empty, and
+  '#' in MASS BEFORE (Efficiency Test) marks a sample as not tested only if it has no measurements yet. Visual Inspection and
+  Cryogenic Immersion are not read from the sheet.</p>
+{% if revisadas %}{% if eh_admin %}<div class="aviso-flash erro">⚠ Already signed off – applying removes the Final QA sign-off,
+  so they need a new sign-off: {{ revisadas|join(', ') }}</div>
+{% else %}<div class="aviso-flash erro">🔒 Signed off (Completed) – only an Admin can change them, so these are skipped:
+  {{ revisadas|join(', ') }}</div>{% endif %}{% endif %}
+
+<form method="post" action="{{ url_for('aplicar_sincronizacao') }}">
+  <input type="hidden" name="token" value="{{ token }}">
+  {% if novas %}<label class="marcar destaque"><input type="checkbox" name="criar_novas" value="1" checked>
+    Create {{ novas }} new sample(s) for the runs that are not in the app yet (they stay Incomplete until batch, responsible and
+    tests are filled)</label>{% endif %}
+  {% for alvo, lista in grupos.items() %}
+  {% set nova = alvo is not number %}
+  <details class="cartao" {{ '' if nova else 'open' }}>
+    <summary>{% if nova %}<span class="pill st-to-be-reviewed">NEW</span>{% else %}Run {{ numeros[alvo] }}{% endif %}
+      <span class="mono">{{ lista[0].pid }}</span>
+      {% if lista[0].revisada %}<span class="pill st-incomplete">reviewed</span>{% endif %}
+      <span class="direita suave pequeno">{{ lista|length }} change(s)</span></summary>
+    <div class="dentro rolagem">
+      <table><thead><tr><th>Item</th><th>Field</th><th>Current</th><th>New (sheet)</th><th>Sheet row</th></tr></thead><tbody>
+      {% for m in lista %}
+        <tr><td>{{ ('Pos ' ~ m.item) if m.tipo == 'massa' else (m.item or '–') }}</td><td>{{ m.nome_campo }}</td>
+          <td class="mono suave">{{ m.antigo or '(empty)' }}</td><td class="mono"><b>{{ m.novo or '(empty)' }}</b></td>
+          <td class="suave">{{ m.aba }} {{ m.linha }}</td></tr>
+      {% endfor %}
+      </tbody></table>
+    </div>
+  </details>
+  {% endfor %}
+  <div class="barra-salvar">
+    <a class="botao" href="{{ url_for('lista') }}">Cancel</a>
+    <button class="botao primario">Apply changes</button>
+  </div>
+</form>
+{% endblock %}

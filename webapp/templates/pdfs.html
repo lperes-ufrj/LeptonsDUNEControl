@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block titulo %}Export all PDFs{% endblock %}
+{% block conteudo %}
+<div class="trilha"><a href="{{ url_for('lista') }}">All samples</a><span class="sep">›</span><b>Export all PDFs</b></div>
+<div class="cartao">
+  <h2>{{ feitos }} PDF(s) saved</h2>
+  <p>Folder on this computer: <span class="mono">{{ pasta }}</span></p>
+  {% if erros %}<h3 class="nao">{{ erros|length }} failed</h3><ul>{% for e in erros %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+  <div class="linha-botoes">
+    {% if feitos %}<a class="botao primario" href="{{ url_for('zip_pdfs', pasta=pasta.name) }}">Download all (ZIP)</a>{% endif %}
+    <a class="botao" href="{{ url_for('lista') }}">Back to the sample list</a>
+  </div>
+</div>
+{% endblock %}

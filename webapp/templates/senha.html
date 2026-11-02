@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block titulo %}Change password{% endblock %}
+{% block conteudo %}
+<div class="trilha"><a href="{{ url_for('lista') }}">All samples</a><span class="sep">›</span><b>Change my password</b></div>
+<div class="cartao estreito">
+  <h2>Change my password</h2>
+  <p class="suave">{{ usuario.nome or usuario.username }} · {{ usuario.username }} · {{ usuario.perfil }}</p>
+  {% if erro %}<div class="aviso-flash erro">{{ erro }}</div>{% endif %}
+  <form method="post" class="form-login">
+    <label>Current password<input type="password" name="atual" autocomplete="current-password" required autofocus></label>
+    <label>New password (min. {{ min_senha }})<input type="password" name="nova" autocomplete="new-password" required></label>
+    <label>Repeat new password<input type="password" name="nova2" autocomplete="new-password" required></label>
+    <button class="botao primario">Save</button>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block titulo %}QR code · run {{ d.numero or '–' }}{% endblock %}
+{% block conteudo %}
+<div class="trilha"><a href="{{ url_for('lista') }}">All samples</a><span class="sep">›</span>
+  <a href="{{ url_for('tarefa', tarefa_id=d.id) }}">Run {{ d.numero or '–' }}</a><span class="sep">›</span><b>QR code</b></div>
+<div class="cartao caixa-qr">
+  <img src="{{ url_for('qr_png', tarefa_id=d.id) }}" alt="QR code of the report of {{ d.tarefa.codigo_tarefa }}">
+  <h2>Scan to open the report options</h2>
+  <div class="linha-copiar"><input id="url-qr" value="{{ url }}" readonly>
+    <button class="botao" type="button" onclick="navigator.clipboard.writeText(document.getElementById('url-qr').value); this.textContent = 'Copied'">Copy link</button></div>
+  <p class="nota">{{ aviso }}</p>
+  <div class="linha-botoes">
+    <a class="botao primario" href="{{ url_for('qr_png', tarefa_id=d.id, download=1) }}">Download QR image</a>
+    <a class="botao" href="{{ url_for('relatorio_html', tarefa_id=d.id) }}" target="_blank">Open report</a>
+    <a class="botao" href="{{ url_for('tarefa', tarefa_id=d.id) }}">Close</a>
+  </div>
+</div>
+{% endblock %}

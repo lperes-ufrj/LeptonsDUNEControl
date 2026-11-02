@@ -9,7 +9,7 @@ import sys
 import threading
 import webbrowser
 
-from webapp.app import criar_app
+from webapp.app import criar_app, tarefas_ao_abrir
 
 PORTA = 8780
 
@@ -27,7 +27,11 @@ if __name__ == "__main__":
     porta = porta_livre(PORTA)
     url = f"http://127.0.0.1:{porta}/"
     print(f"Deposition Control System running at {url}  (Ctrl+C or the Quit button to stop)")
+    app = criar_app()
+    # servidor dos links do QR code (rede local) e backup semanal, como no programa de mesa
+    for aviso in tarefas_ao_abrir():
+        print("Backup warning:", aviso)
     if "--no-browser" not in sys.argv:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
-    # 127.0.0.1: só este computador acessa (sem aviso do firewall do Windows)
-    criar_app().run(host="127.0.0.1", port=porta, debug=False, use_reloader=False)
+    # 127.0.0.1: o aplicativo só abre neste computador (os links do QR usam o servidor próprio, só de leitura)
+    app.run(host="127.0.0.1", port=porta, debug=False, use_reloader=False, threaded=True)

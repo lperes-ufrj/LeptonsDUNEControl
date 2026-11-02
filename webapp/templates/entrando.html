@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Starting · Deposition Control · LEPTONS Lab</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='leptons-icon.svg') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="tela-entrada">
+  <main class="entrada" id="entrada" data-api="{{ url_for('api_entrando') }}" data-proxima="{{ proxima }}">
+    <img class="entrada-logo" src="{{ url_for('static', filename='leptons.png') }}" alt="LEPTONS Lab">
+    <div class="entrada-produto">Deposition Control <span>Unicamp · DUNE</span></div>
+
+    {# o "O" do logo: anel cinza com o ponto verde; um arco verde gira em volta enquanto prepara #}
+    <svg class="entrada-anel" viewBox="0 0 100 100" aria-hidden="true">
+      <circle class="anel-fundo" cx="50" cy="50" r="34"></circle>
+      <circle class="anel-arco" cx="50" cy="50" r="34"></circle>
+      <circle class="anel-ponto" cx="50" cy="50" r="10"></circle>
+    </svg>
+
+    <div class="entrada-barra"><span id="barra"></span></div>
+    <p class="entrada-ola">Welcome, {{ usuario.nome or usuario.username }}</p>
+    <ul class="entrada-passos" id="passos" aria-live="polite">
+      <li class="atual">Checking the databases…</li>
+    </ul>
+    <div class="entrada-erro" id="erro" hidden>
+      <p id="erro-texto"></p>
+      <button class="botao" type="button" id="tentar">Try again</button>
+      <a class="botao primario" href="{{ proxima }}">Continue anyway</a>
+    </div>
+  </main>
+
+  <script>
+  (function () {
+    const raiz = document.getElementById("entrada");
+    const lista = document.getElementById("passos");
+    const barra = document.getElementById("barra");
+    const calmo = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const MINIMO = calmo ? 600 : 2200;          // tempo mínimo na tela (ms), para a animação não piscar
+    const espera = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    function passo(texto, classe) {
+      lista.querySelectorAll("li.atual").forEach((li) => li.classList.replace("atual", "feito"));
+      const li = document.createElement("li");
+      li.textContent = texto;
+      li.className = classe || "atual";
+      lista.appendChild(li);
+    }
+
+    async function preparar() {
+      document.getElementById("erro").hidden = true;
+      raiz.classList.remove("com-erro");
+      barra.style.transition = "none"; barra.style.width = "0";
+      void barra.offsetWidth;
+      barra.style.transition = ""; barra.style.width = "85%";
+      const inicio = performance.now();
+      let r;
+      try {
+        const resp = await fetch(raiz.dataset.api, { method: "POST" });
+        r = await resp.json();
+        if (!r.ok) throw new Error(r.erro || resp.status);
+      } catch (e) {
+        raiz.classList.add("com-erro");
+        document.getElementById("erro-texto").textContent = "Could not prepare the session: " + e.message;
+        document.getElementById("erro").hidden = false;
+        return;
+      }
+      const resto = MINIMO - (performance.now() - inicio);
+      const intervalo = Math.max(150, resto / Math.max(1, r.passos.length + 1));
+      for (const p of r.passos) { await espera(calmo ? 0 : intervalo); passo(p); }
+      await espera(calmo ? 0 : intervalo);
+      passo("Ready", "feito pronto");
+      barra.style.width = "100%";
+      await espera(calmo ? 150 : 450);
+      raiz.classList.add("saindo");
+      await espera(calmo ? 0 : 350);
+      location.replace(raiz.dataset.proxima);
+    }
+    document.getElementById("tentar").addEventListener("click", () => {
+      lista.innerHTML = '<li class="atual">Checking the databases…</li>';
+      preparar();
+    });
+    preparar();
+  })();
+  </script>
+</body>
+</html>

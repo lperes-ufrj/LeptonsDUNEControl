@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block titulo %}Users{% endblock %}
+{% block conteudo %}
+<div class="cabecalho"><div><h1>Manage users</h1>
+  <div class="sub">The same users as the desktop programs (usuarios.db). New users choose their own password at the first login.</div></div></div>
+<div class="cartao rolagem">
+  <table>
+    <thead><tr><th>Username</th><th>Full name</th><th>Role</th><th>Active</th><th>Last login</th><th></th></tr></thead>
+    <tbody>
+    {% for id_, user, nome, perfil, ativo, ult in lista %}
+      <tr class="{{ '' if ativo else 'inativo' }}">
+        <td class="mono"><b>{{ user }}</b></td>
+        <td colspan="2">
+          <form method="post" action="{{ url_for('editar_usuario', user_id=id_) }}" class="linha-form">
+            <input name="nome" value="{{ nome }}" required>
+            <select name="perfil">{% for p in perfis %}<option{{ ' selected' if p == perfil }}>{{ p }}</option>{% endfor %}</select>
+            <button class="botao mini-botao">Save</button>
+          </form></td>
+        <td>{{ 'Yes' if ativo else 'No' }}</td>
+        <td class="mono pequeno">{{ ult or '–' }}</td>
+        <td class="acoes-linha">
+          <details class="menu-reset"><summary class="botao mini-botao">Reset password</summary>
+            <form method="post" action="{{ url_for('redefinir_senha', user_id=id_) }}" class="linha-form">
+              <input type="password" name="senha" placeholder="Temporary password" required autocomplete="new-password">
+              <input type="password" name="senha2" placeholder="Repeat" required autocomplete="new-password">
+              <button class="botao mini-botao">Set</button></form></details>
+          <form method="post" action="{{ url_for('ativar_desativar', user_id=id_) }}"
+                onsubmit="return confirm('{{ 'Deactivate' if ativo else 'Activate' }} user {{ user }}?\nRecords made by this user are kept.')">
+            <button class="botao mini-botao {{ 'perigo' if ativo }}">{{ 'Deactivate' if ativo else 'Activate' }}</button></form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="cartao estreito">
+  <h2>New user</h2>
+  <form method="post" action="{{ url_for('novo_usuario') }}" class="form-login">
+    <label>Username<input name="username" required pattern="[A-Za-z0-9._\-]{3,30}" title="3 to 30 letters, numbers, dot, dash or underscore"></label>
+    <label>Full name<input name="nome" required></label>
+    <label>Role<select name="perfil">{% for p in perfis %}<option>{{ p }}</option>{% endfor %}</select></label>
+    <label>Temporary password (min. {{ min_senha }})<input type="password" name="senha" required autocomplete="new-password"></label>
+    <label>Repeat password<input type="password" name="senha2" required autocomplete="new-password"></label>
+    <button class="botao primario">Create</button>
+  </form>
+</div>
+{% endblock %}

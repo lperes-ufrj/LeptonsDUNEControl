@@ -3,13 +3,17 @@
 As regras são as mesmas do programa de mesa (tela_tarefas_..._v9_login.py): pendências, estados da imersão
 criogênica e da eficiência óptica, Incomplete -> To be reviewed -> Completed.
 """
+import os
 import re
 import sqlite3
 from pathlib import Path
 
-BASE = Path(__file__).resolve().parent.parent          # pasta do projeto (onde ficam os .db)
-DB_TAREFAS = BASE / "rastreabilidade.db"
-DB_LOTES = BASE / "lotes.db"
+BASE = Path(__file__).resolve().parent.parent          # pasta do projeto (logos e programas)
+# pasta dos dados (.db, PDFs, backups...): a do projeto; LEPTONS_DADOS aponta outra (ex.: cópia para testes)
+PASTA = Path(os.environ.get("LEPTONS_DADOS") or BASE).resolve()
+DB_TAREFAS = PASTA / "rastreabilidade.db"
+DB_LOTES = PASTA / "lotes.db"
+DB_USUARIOS = PASTA / "usuarios.db"
 
 AREA_FILTRO_CM2 = 77.0
 N_FILTROS = 28
@@ -25,17 +29,25 @@ COLUNAS_INSPECAO = [          # (coluna no banco, título)
 ]
 OBRIGATORIOS_FILTRO = [c for c, _ in COLUNAS_INSPECAO] + ["classification"]
 
-ITENS_IMERSAO = [             # (chave, item, critério de aceitação)
-    ("film_adhesion", "PTP Film Adhesion", "No evidence of film peeling, delamination, or detachment."),
-    ("film_integrity", "Film Integrity", "No visible cracks, fractures, or discontinuities in the deposited layer."),
+ITENS_IMERSAO = [             # (chave, item, critério de aceitação, condição de rejeição)
+    ("film_adhesion", "PTP Film Adhesion",
+     "No evidence of film peeling, delamination, or detachment.",
+     "Any visible peeling, delamination, or film detachment."),
+    ("film_integrity", "Film Integrity",
+     "No visible cracks, fractures, or discontinuities in the deposited layer.",
+     "Visible cracks, fractures, or discontinuities in the deposited layer."),
     ("surface_condition", "Surface Condition",
-     "No discoloration, whitening, blistering, or degradation attributable to cryogenic exposure."),
+     "No discoloration, whitening, blistering, or degradation attributable to cryogenic exposure.",
+     "Discoloration, blistering, whitening, or other signs of degradation after testing."),
     ("substrate_integrity", "Substrate Integrity",
-     "No cracks, fractures, chipping, or structural damage to the glass substrate."),
+     "No cracks, fractures, chipping, or structural damage to the glass substrate.",
+     "Any crack, fracture, chipping, or structural damage."),
     ("cryo_compatibility", "Cryogenic Compatibility",
-     "No visible changes indicating failure during cooling, immersion, or recovery stages."),
+     "No visible changes indicating failure during cooling, immersion, or recovery stages.",
+     "Any visible alteration indicating failure during cooling, immersion, or recovery."),
     ("post_test", "Post-Test Visual Inspection",
-     "Glass substrate appearance consistent with pre-test condition, excluding normal handling marks."),
+     "Glass substrate appearance consistent with pre-test condition, excluding normal handling marks.",
+     "Any defect not present before testing and attributable to cryogenic exposure."),
 ]
 
 STATUS_INCOMPLETO = "Incomplete"
@@ -46,7 +58,7 @@ TXT_ESTADO = {"approved": "Approved", "rejected": "Rejected", "partial": "In pro
 
 
 def _conectar(caminho):
-    """Abre o banco só para leitura: o navegador nunca altera os dados nesta fase."""
+    """Abre o banco só para leitura (listas e páginas); as gravações usam banco.conectar()."""
     conn = sqlite3.connect(caminho.resolve().as_uri() + "?mode=ro", uri=True, timeout=10)
     conn.row_factory = sqlite3.Row
     return conn

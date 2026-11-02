@@ -6,7 +6,7 @@
 {% block conteudo %}
 {% set l0 = d.lotes[0] if d.lotes else none %}
 <div class="trilha">
-  <a href="{{ url_for('lista') }}">All tasks</a>
+  <a href="{{ url_for('lista') }}">All samples</a>
   {% if l0 %}
     <span class="sep">›</span><a href="{{ url_for('lista', lote=l0.opto) }}">{{ l0.opto or 'No batch yet' }}</a>
     {% if l0.interno %}<span class="sep">›</span><a href="{{ url_for('lista', lote=l0.opto, interno=l0.interno) }}">{{ l0.interno }}</a>{% endif %}
@@ -23,9 +23,29 @@
       {% if t.data_hora_registro %} · last saved {{ t.data_hora_registro }}{% endif %}</div>
   </div>
   <div class="acoes">
+    {% set assinada = (t.qa_signoff_por or '').strip() %}
+    {% if not assinada or eh_admin %}
+    <a class="botao primario" href="{{ url_for('editar_tarefa', tarefa_id=d.id) }}"
+       {% if assinada %}title="Signed off: saving changes removes the Final QA sign-off"{% endif %}>Edit sample</a>
+    {% else %}
+    <span class="botao desativado" title="Signed off (Final QA) – only an Admin can change a completed sample">🔒 Edit sample</span>
+    {% endif %}
+    <a class="botao" href="{{ url_for('revisar', tarefa_id=d.id) }}">Review sample</a>
     {% if anterior %}<a class="botao" href="{{ url_for('tarefa', tarefa_id=anterior.id) }}">← Run {{ anterior.numero or '–' }}</a>{% endif %}
     {% if proxima %}<a class="botao" href="{{ url_for('tarefa', tarefa_id=proxima.id) }}">Run {{ proxima.numero or '–' }} →</a>{% endif %}
   </div>
+</div>
+
+<div class="barra-acoes">
+  <a class="botao" href="{{ url_for('relatorio_html', tarefa_id=d.id) }}" target="_blank">Open report</a>
+  <a class="botao" href="{{ url_for('relatorio_pdf', tarefa_id=d.id) }}" target="_blank">Print report (PDF)</a>
+  <a class="botao" href="{{ url_for('qr', tarefa_id=d.id) }}">Generate QR Code</a>
+  <a class="botao" href="{{ url_for('exportar_json', tarefa_id=d.id) }}">Export sample (JSON)</a>
+  {% if eh_admin %}
+  <button type="button" class="botao perigo direita" data-excluir="{{ url_for('excluir_tarefa', tarefa_id=d.id) }}"
+          data-titulo="Delete sample ID {{ d.numero or '–' }}"
+          data-texto="Sample {{ t.codigo_tarefa or '(no PID)' }} and everything recorded for it (deposition, visual inspection, cryogenic immersion, optical efficiency, review) will be deleted.">Delete sample</button>
+  {% endif %}
 </div>
 
 {% set completos, classes, _ = d.visual %}
@@ -43,7 +63,7 @@
 {% if d.pendencias %}
 <details class="cartao" open>
   <summary>Missing information <span class="pill st-incomplete">{{ d.pendencias|length }}</span>
-    <span class="direita suave pequeno">needed before the task can be reviewed</span></summary>
+    <span class="direita suave pequeno">needed before the sample can be reviewed</span></summary>
   <div class="dentro"><ul class="lista-pendencias">{% for p in d.pendencias %}<li>{{ p }}</li>{% endfor %}</ul></div>
 </details>
 {% endif %}
@@ -64,6 +84,8 @@
     <dt>Batches</dt>
     <dd class="largo">{% for l in d.lotes %}{{ l.opto or '–' }}{% if l.interno %} › {{ l.interno }}{% endif %}{% if l.empresa %} <span class="suave">({{ l.empresa }}{% if l.chegada %}, arrived {{ l.chegada }}{% endif %})</span>{% endif %}{% if not loop.last %}<br>{% endif %}{% else %}–{% endfor %}</dd>
     {% if t.observacoes %}<dt>Observations</dt><dd class="largo texto">{{ t.observacoes }}</dd>{% endif %}
+    {% if anexos %}<dt>Attached files</dt><dd class="largo texto">
+      {% for a in anexos %}<a href="{{ url_for('anexo', tarefa_id=d.id, file=a) }}" target="_blank">{{ a|basename }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</dd>{% endif %}
   </dl>
 </div>
 
@@ -139,7 +161,7 @@
         <table>
           <thead><tr><th>Item</th><th class="centro">Pass</th></tr></thead>
           <tbody>
-          {% for chave, item, criterio in dados.ITENS_IMERSAO %}
+          {% for chave, item, criterio, _ in dados.ITENS_IMERSAO %}
             <tr title="{{ criterio }}"><td>{{ item }}</td><td class="centro">{{ sim_nao(d.im_itens.get(chave)) }}</td></tr>
           {% endfor %}
           </tbody>
@@ -187,6 +209,8 @@
       <dt>Signed off by</dt><dd>{{ t.qa_signoff_por|ou_traco }}</dd>
       <dt>Date</dt><dd>{{ t.qa_signoff_data|ou_traco }}</dd>
     </dl>
+    {% if (t.qa_signoff_por or '').strip() %}<p class="nota">🔒 Completed: only an Admin can change this sample, and any change
+      removes this sign-off – the sample goes back to “To be reviewed” and needs a new Final QA sign-off.</p>{% endif %}
   </div>
 </details>
 {% endblock %}

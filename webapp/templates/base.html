@@ -3,21 +3,33 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block titulo %}Deposition Control{% endblock %} · LEPTONS</title>
+  <title>{% block titulo %}Deposition Control{% endblock %} · LEPTONS Lab</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='leptons-icon.svg') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
+  {% set em_lotes = (request.endpoint or '').startswith('lote') %}
   <header class="topo">
     <a class="marca" href="{{ url_for('lista') }}">
-      <img src="{{ url_for('logo', nome='esquerda.png') }}" alt="">
-      <span>Deposition Control</span>
+      <img src="{{ url_for('static', filename='leptons.png') }}" alt="LEPTONS Lab">
+      <span class="produto">Deposition Control<small>Unicamp · DUNE</small></span>
     </a>
     <nav class="nav">
-      <a href="{{ url_for('lista') }}" class="ativo">Tasks</a>
+      <a href="{{ url_for('lista') }}" class="{{ 'ativo' if not em_lotes and request.endpoint not in ('usuarios', 'auditoria', 'trocar_senha') }}">Samples</a>
+      <a href="{{ url_for('lotes_lista') }}" class="{{ 'ativo' if em_lotes }}">Batches</a>
+      {% if eh_admin %}
+      <a href="{{ url_for('usuarios') }}" class="{{ 'ativo' if request.endpoint == 'usuarios' }}">Users</a>
+      <a href="{{ url_for('auditoria') }}" class="{{ 'ativo' if request.endpoint == 'auditoria' }}">Audit log</a>
+      {% endif %}
     </nav>
     <div class="direita">
-      <form class="busca-topo" action="{{ url_for('lista') }}">
-        <input name="q" value="{{ q or '' }}" placeholder="Search run, PID, batch, responsible…" autocomplete="off">
+      <form class="busca-topo" action="{{ url_for('lotes_lista' if em_lotes else 'lista') }}">
+        <input name="q" value="{{ q or '' }}" autocomplete="off"
+               placeholder="{{ 'Search batch, tracking ID, internal lot…' if em_lotes else 'Search run, PID, batch, responsible…' }}">
+      </form>
+      <a class="quem" href="{{ url_for('trocar_senha') }}" title="{{ usuario.username }} · {{ usuario.perfil }} – change my password">{{ usuario.nome or usuario.username }}<small>{{ usuario.perfil }}</small></a>
+      <form action="{{ url_for('logout') }}" method="post">
+        <button class="botao sair">Log out</button>
       </form>
       <form action="{{ url_for('sair') }}" method="post"
             onsubmit="return confirm('Close the Deposition Control browser app?')">
@@ -25,14 +37,43 @@
       </form>
     </div>
   </header>
-  <div class="faixa"><b>BROWSER PREVIEW</b>read-only view of rastreabilidade.db — edit tasks in the desktop app</div>
 
-  <div class="corpo">
+  <div class="corpo {{ 'sem-lateral' if arvore is not defined and lat_lotes is not defined }}">
+    {% if lat_lotes is defined %}
+    <aside class="lateral">
+      <div class="titulo-lateral">Inspection result</div>
+      <ul class="arvore">
+        <li><a href="{{ url_for('lotes_lista') }}" class="{{ 'ativo' if request.endpoint == 'lotes_lista' and not res and not q }}">
+          <span class="rotulo">All batches</span><span class="n">{{ lat_lotes|length }}</span></a></li>
+        {% for r in chegada_resultados %}
+        <li><a href="{{ url_for('lotes_lista', result=r) }}" class="{{ 'ativo' if res == r }}">
+          <span class="rotulo">{{ r }}</span><span class="n">{{ contagem_res[r] }}</span></a></li>
+        {% endfor %}
+      </ul>
+
+      <div class="titulo-lateral">OPTO batches</div>
+      <ul class="arvore">
+        {% for l in lat_lotes %}
+        <li><a href="{{ url_for('lote', lote_id=l.id) }}" class="{{ 'ativo' if lote_atual == l.id }}" title="{{ l.tracking_id or '' }}">
+          <span class="rotulo">{{ l.lote_geral or l.tracking_id or 'ID ' ~ l.id }}</span>
+          <span class="n">{{ l.n_internos }}/{{ l.numero_caixas_menores or 0 }}</span></a></li>
+        {% else %}
+        <li class="suave pequeno" style="padding: 5px 8px">No batch registered yet</li>
+        {% endfor %}
+      </ul>
+
+      <div class="titulo-lateral">Leptons Lab</div>
+      <ul class="arvore">
+        <li><a href="{{ url_for('lotes_limpeza') }}" class="{{ 'ativo' if request.endpoint == 'lotes_limpeza' }}">
+          <span class="rotulo">Cleaning lots</span><span class="n">{{ n_limpezas }}</span></a></li>
+      </ul>
+    </aside>
+    {% elif arvore is defined %}
     <aside class="lateral">
       <div class="titulo-lateral">Status</div>
       <ul class="arvore">
         <li><a href="{{ url_for('lista') }}" class="{{ 'ativo' if request.endpoint == 'lista' and not st and lote is none and not interno }}">
-          <span class="rotulo">All tasks</span><span class="n">{{ total }}</span></a></li>
+          <span class="rotulo">All samples</span><span class="n">{{ total }}</span></a></li>
         {% for s in STATUS_TODOS %}
         <li><a href="{{ url_for('lista', status=s) }}" class="{{ 'ativo' if st == s }}">
           <span class="rotulo">{{ s }}</span><span class="n">{{ contagem[s] }}</span></a></li>
@@ -44,7 +85,7 @@
         {% for opto, g in arvore %}
         <li>
           <a href="{{ url_for('lista', lote=opto) }}" class="{{ 'ativo' if lote == opto and not interno }} {{ 'vazio' if not opto }}"
-             title="{{ opto or 'Tasks without a batch' }}">
+             title="{{ opto or 'Samples without a batch' }}">
             <span class="rotulo"><span class="seta">{{ '▾' if g.internos else '▸' }}</span>{{ opto or 'No batch yet' }}</span>
             <span class="n">{{ g.total }}</span></a>
           {% if g.internos %}
@@ -59,10 +100,51 @@
         {% endfor %}
       </ul>
     </aside>
+    {% endif %}
 
     <main class="conteudo">
+      {% with mensagens = get_flashed_messages(with_categories=true) %}
+      {% for tipo, msg in mensagens %}<div class="aviso-flash {{ tipo }}">{{ msg }}</div>{% endfor %}
+      {% endwith %}
       {% block conteudo %}{% endblock %}
-      <div class="rodape">LEPTONS · Deposition Control System for DUNE · read at {{ agora }}</div>
+      {% if eh_admin %}
+      {# janela de exclusão: só um Admin exclui, confirmando com a própria senha #}
+      <dialog id="dlg-excluir" class="dialogo pequeno">
+        <form method="post" id="form-excluir">
+          <div class="dialogo-topo"><h2 id="excluir-titulo">Delete</h2><button type="button" class="x" data-fechar-excluir>✕</button></div>
+          <div class="dialogo-corpo form-login">
+            <p id="excluir-texto"></p>
+            <p class="nao">This cannot be undone.</p>
+            <label>Confirm with your password ({{ usuario.username }})
+              <input type="password" name="senha" required autocomplete="current-password"></label>
+          </div>
+          <div class="dialogo-rodape">
+            <button type="button" class="botao" data-fechar-excluir>Cancel</button>
+            <button class="botao perigo-cheio">Delete</button>
+          </div>
+        </form>
+      </dialog>
+      <script>
+        (function () {
+          const dlg = document.getElementById("dlg-excluir"), form = document.getElementById("form-excluir");
+          document.querySelectorAll("[data-excluir]").forEach((b) => b.addEventListener("click", () => {
+            form.action = b.dataset.excluir;
+            form.senha.value = "";
+            document.getElementById("excluir-titulo").textContent = b.dataset.titulo + "?";
+            document.getElementById("excluir-texto").textContent = b.dataset.texto || "";
+            dlg.showModal();
+            form.senha.focus();
+          }));
+          dlg.querySelectorAll("[data-fechar-excluir]").forEach((b) => b.addEventListener("click", () => dlg.close()));
+          form.addEventListener("submit", () => form.querySelector(".perigo-cheio").disabled = true);
+        })();
+      </script>
+      {% endif %}
+      <div class="rodape">
+        <img src="{{ url_for('logo', nome='esquerda.png', recorte=1) }}" alt="Unicamp">
+        <img src="{{ url_for('logo', nome='direita.png', recorte=1) }}" alt="DUNE">
+        <span class="texto-rodape">LEPTONS Laboratory · Unicamp · Deposition Control System for DUNE · read at {{ agora }}</span>
+      </div>
     </main>
   </div>
 </body>

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block titulo %}Import sample{% endblock %}
+{% block conteudo %}
+<div class="trilha"><a href="{{ url_for('lista') }}">All samples</a><span class="sep">›</span><b>Import sample (JSON)</b></div>
+{% if erro %}<div class="aviso-flash erro">{{ erro }}</div>{% endif %}
+{% if escolher %}
+<div class="cartao">
+  <h2>A sample with PID {{ pid }} already exists (ID {{ existentes }})</h2>
+  <p>The file is loaded into the sample form for review; nothing is saved until you click Save.</p>
+  <div class="linha-botoes">
+    <a class="botao primario" href="{{ url_for('formulario_importado', token=token, into=alvo) }}">Load over sample ID {{ numero_alvo }}</a>
+    <a class="botao" href="{{ url_for('formulario_importado', token=token) }}">Load as a new sample</a>
+    <a class="botao" href="{{ url_for('lista') }}">Cancel</a>
+  </div>
+</div>
+{% else %}
+<div class="cartao">
+  <h2>Import sample (JSON)</h2>
+  <p>Choose a file created by <b>Export sample (JSON)</b> (in this app or in the desktop program). The sample opens in the form
+    for review; it is saved only when you click Save.</p>
+  <form method="post" enctype="multipart/form-data" class="linha-botoes">
+    <input type="file" name="arquivo" accept=".json,application/json" required>
+    <button class="botao primario">Load</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}
