@@ -21,8 +21,9 @@
       <span class="produto">Deposition Control<small>Unicamp · DUNE</small></span>
     </a>
     <nav class="nav">
-      <a href="{{ url_for('lista') }}" class="{{ 'ativo' if not em_lotes and request.endpoint not in ('usuarios', 'auditoria', 'trocar_senha') }}">{{ _("Samples") }}</a>
+      <a href="{{ url_for('lista') }}" class="{{ 'ativo' if not em_lotes and request.endpoint not in ('usuarios', 'auditoria', 'trocar_senha', 'estatisticas_pagina') }}">{{ _("Samples") }}</a>
       <a href="{{ url_for('lotes_lista') }}" class="{{ 'ativo' if em_lotes }}">{{ _("Batches") }}</a>
+      <a href="{{ url_for('estatisticas_pagina') }}" class="{{ 'ativo' if request.endpoint == 'estatisticas_pagina' }}">{{ _("Statistics") }}</a>
       {% if eh_admin %}
       <a href="{{ url_for('usuarios') }}" class="{{ 'ativo' if request.endpoint == 'usuarios' }}">{{ _("Users") }}</a>
       <a href="{{ url_for('auditoria') }}" class="{{ 'ativo' if request.endpoint == 'auditoria' }}">{{ _("Audit log") }}</a>

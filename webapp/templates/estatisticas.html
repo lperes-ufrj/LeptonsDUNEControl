@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block titulo %}{{ _("Statistics") }}{% endblock %}
+{% macro media(r, casas=1) %}{% if r.n %}{{ "%.*f"|format(casas, r.media) }} <span class="pequeno suave">± {{ "%.*f"|format(casas, r.dp) }}</span>{% else %}<span class="suave">–</span>{% endif %}{% endmacro %}
+{# um gráfico: título, subtítulo, o desenho (estatisticas.js) e a tabela com os mesmos números #}
+{% macro grafico(chave, titulo, sub='', classe='') %}
+{% set g = e.graficos[chave] %}
+<figure class="grafico-bloco">
+  <figcaption><b>{{ titulo }}</b>{% if sub %}<small>{{ sub }}</small>{% endif %}</figcaption>
+  {% if g and g.tipo == 'linhas' %}
+  <div class="legenda-grafico">{% for s in g.series %}<span><i style="background: var(--serie-{{ s.cor }})"></i>{{ s.nome }}</span>{% endfor %}</div>
+  {% endif %}
+  {% if g %}
+  <div class="grafico {{ classe }}" data-g="{{ chave }}" role="img" aria-label="{{ titulo }}"></div>
+  {% if g.tipo == 'histograma' %}<div class="estat-linha">{% for s in g.series %}{{ s.texto }}{% endfor %}</div>{% endif %}
+  <details class="ver-tabela">
+    <summary>{{ _("Table") }}</summary>
+    <div class="rolagem"><table class="tabela-tarefas">
+      <thead><tr>{% for c in g.tabela.cab %}<th class="{{ 'num' if not loop.first }}">{{ c }}</th>{% endfor %}</tr></thead>
+      <tbody>{% for l in g.tabela.linhas %}<tr>{% for v in l %}<td class="{{ 'num mono' if not loop.first else 'mono' }}">{{ v }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+    </table></div>
+  </details>
+  {% else %}
+  <div class="sem-dados">{{ _("No data in this selection.") }}</div>
+  {% endif %}
+</figure>
+{% endmacro %}
+{% block conteudo %}
+<div class="cabecalho">
+  <div>
+    <h1>{{ _("Process statistics") }}</h1>
+    <div class="sub">
+      {% if e.n == e.n_total %}{{ _("all {n} samples", n=e.n) }}{% else %}{{ _("{n} of {total} samples", n=e.n, total=e.n_total) }}{% endif %}
+      {% if de or ate %} · {{ _("deposited") }} {% if de %}{{ _("from") }} <span class="mono">{{ de }}</span>{% endif %} {% if ate %}{{ _("to") }} <span class="mono">{{ ate }}</span>{% endif %}{% endif %}
+      {% if lote_sel %} · OPTO batch <span class="mono">{{ lote_sel }}</span>{% endif %}
+      {% if e.sem_data %} · {{ _("{n} without a deposition date", n=e.sem_data) }}{% endif %}
+    </div>
+  </div>
+</div>
+
+{# filtros: valem para tudo o que está abaixo #}
+<form class="filtros-estat" method="get">
+  <span class="grupo">
+    {% for nome, inicio in atalhos %}
+    <a href="{{ url_for('estatisticas_pagina', batch=lote_sel or None, **({'from': inicio.isoformat()} if inicio else {})) }}"
+       class="{{ 'ativo' if (inicio == de and not ate) }}">{{ nome }}</a>
+    {% endfor %}
+  </span>
+  <label>{{ _("From") }} <input type="date" name="from" value="{{ de or '' }}" max="{{ hoje }}"></label>
+  <label>{{ _("To") }} <input type="date" name="to" value="{{ ate or '' }}" max="{{ hoje }}"></label>
+  <label>OPTO batch
+    <select name="batch">
+      <option value="">{{ _("All batches") }}</option>
+      {% for o in e.optos %}<option {{ 'selected' if o == lote_sel }}>{{ o }}</option>{% endfor %}
+    </select></label>
+  <button class="botao primario">{{ _("Apply") }}</button>
+  {% if de or ate or lote_sel %}<a class="botao" href="{{ url_for('estatisticas_pagina') }}">{{ _("Clear") }}</a>{% endif %}
+</form>
+
+<div class="resumo">
+  <div class="item"><div class="rot">Samples</div>
+    <div class="val grande">{{ e.n }}</div>
+    <div class="pequeno suave">{{ _("{n} filters deposited ({por} per sample)", n=e.filtros_dep, por=N_FILTROS) }}</div></div>
+  <div class="item"><div class="rot">Status</div>
+    <div class="val">{% for s in STATUS_TODOS %}<span class="pill st-{{ s|lower|replace(' ', '-') }}">{{ s }} {{ e.status[s] }}</span>{% endfor %}</div></div>
+  <div class="item"><div class="rot">{{ _("Batch decision") }}</div>
+    <div class="val"><span class="pill es-approved">Approved {{ e.decisao.Approved }}</span><span class="pill es-rejected">Rejected {{ e.decisao.Rejected }}</span>
+      <span class="pill es-partial">Pending {{ e.decisao.Pending }}</span></div></div>
+  <div class="item"><div class="rot">{{ _("Mass density · Center (P02)") }}</div>
+    <div class="val grande">{{ media(e.centro) }}</div>
+    <div class="pequeno suave">µg/cm² · {{ _("mean ± s.d. of {n} samples", n=e.centro.n) }}</div></div>
+  <div class="item"><div class="rot">Visual inspection</div>
+    <div class="val"><span class="classe-A">A {{ e.classes.A }}</span> · <span class="classe-B">B {{ e.classes.B }}</span> · <span class="classe-C">C {{ e.classes.C }}</span></div>
+    <div class="pequeno suave">{{ _("{n} filters classified", n=e.n_classes) }}</div></div>
+  <div class="item"><div class="rot">Cryogenic immersion</div>
+    <div class="val"><span class="sim">{{ _("Yes") }} {{ e.itens_im.Yes }}</span> · <span class="nao">{{ _("No") }} {{ e.itens_im.No }}</span></div>
+    <div class="pequeno suave">{{ _("post-immersion checks answered") }}</div></div>
+  <div class="item"><div class="rot">Optical efficiency</div>
+    <div class="val grande">{{ e.ef_ok }}<span class="pequeno suave">/{{ e.n_ef }}</span></div>
+    <div class="pequeno suave">{{ _("measurements ≥ {x} (acceptance)", x=dados.LIMITE_EFICIENCIA) }}</div></div>
+  <div class="item"><div class="rot">OPTO batches</div>
+    <div class="val grande">{{ e.n_lotes }}</div>
+    <div class="pequeno suave">{{ _("{n} filters received", n=e.filtros_rec) }}</div></div>
+</div>
+
+<div class="cartao estat-cartao">
+  {{ grafico('periodo', _("Samples deposited per month") if e.graficos.periodo and e.graficos.periodo.mensal else _("Samples deposited per week"),
+             _("by deposition date")) }}
+</div>
+
+<div class="cartao estat-cartao">
+  <div class="linha-secao"><span>Deposition · Mass control</span></div>
+  <div class="grade-cartoes">
+    {% for p, nome in dados.POSICOES.items() %}
+    {{ grafico('densidade_' ~ p, _("Mass density · {pos}", pos=nome ~ ' (P%02d)'|format(p)), _("µg/cm², one value per sample")) }}
+    {% endfor %}
+  </div>
+  {{ grafico('por_run', _("Mass density per run"), _("µg/cm² at the three positions; a jump shows a change in the process"), 'alto') }}
+  <div class="dupla">
+    {{ grafico('uniformidade', _("Radial uniformity"), _("External (P14) ÷ Center (P02) mass density; 1 = uniform")) }}
+    {{ grafico('internos', _("Samples per internal lot"), _("box (DUNE-CX-000X) or cleaning lot the filters came from")) }}
+  </div>
+</div>
+
+<div class="cartao estat-cartao">
+  <div class="linha-secao"><span>Visual inspection</span></div>
+  <div class="dupla">
+    {{ grafico('classes', _("Classification"), _("filters per class")) }}
+    {{ grafico('defeitos', _("Defects found"), _("filters with each defect, of {n} inspected", n=e.inspecionados)) }}
+  </div>
+</div>
+
+<div class="cartao estat-cartao">
+  <div class="linha-secao"><span>Cryogenic immersion · Optical efficiency</span></div>
+  <div class="grade-cartoes">
+    {{ grafico('imersao', _("Mass change after immersion"), _("% per sample (P02, P03, P14); acceptance within ±{x} %", x="%g"|format(dados.LIMITE_PERDA_PCT))) }}
+    {{ grafico('eficiencia', _("Relative efficiency"), _("tested samples; acceptance ≥ {x}", x=dados.LIMITE_EFICIENCIA)) }}
+    {{ grafico('dens_ef', _("Witness sample density"), _("µg/cm², samples measured for optical efficiency")) }}
+  </div>
+</div>
+
+<script type="application/json" id="dados-graficos">{{ e.graficos|tojson }}</script>
+<script src="{{ url_for('static', filename='estatisticas.js') }}"></script>
+{% endblock %}

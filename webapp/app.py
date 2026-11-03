@@ -3,7 +3,7 @@
 Faz tudo o que os programas de mesa faziam: lista e cadastro de tarefas (deposição, inspeção visual, imersão
 criogênica, eficiência óptica), revisão (QA sign-off), relatórios HTML/PDF e QR code, exportar/importar .json,
 sincronizar a planilha DUNE_Control, backup, usuários e registro de auditoria; e, na aba Batches, o cadastro de
-chegada de lotes OPTO (caixas menores / lotes internos) e os lotes de limpeza do Leptons.
+chegada de lotes OPTO (caixas menores / lotes internos) e os lotes de limpeza do Leptons; e a aba Statistics.
 """
 import csv
 import io
@@ -12,7 +12,7 @@ import os
 import secrets
 import threading
 import zipfile
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from functools import lru_cache, wraps
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -24,7 +24,7 @@ from werkzeug.utils import secure_filename
 
 import leptons_auth
 
-from . import backup, banco, chegada, dados, i18n, inicio, lotes, pdf, planilha, relatorio, tarefas
+from . import backup, banco, chegada, dados, estatisticas, i18n, inicio, lotes, pdf, planilha, relatorio, tarefas
 from .i18n import t
 
 LOGOS = ("esquerda.png", "direita.png")
@@ -525,6 +525,21 @@ def criar_app():
         except PermissionError:
             return erro_pagina(t("Could not write the file. Close the PDF if it is open and try again: {caminho}", caminho=caminho))
         return send_file(str(caminho), mimetype="application/pdf", download_name=caminho.name)
+
+    # =====================================================================
+    # ESTATÍSTICAS DO PROCESSO
+    # =====================================================================
+    @app.route("/statistics")
+    def estatisticas_pagina():
+        de, ate = (estatisticas._data(request.args.get(k)) for k in ("from", "to"))
+        lote = request.args.get("batch", "")
+        if de and ate and de > ate:
+            de, ate = ate, de
+        hoje = date.today()
+        atalhos = [(t("All time"), None), (t("Last 30 days"), hoje - timedelta(days=30)),
+                   (t("Last 90 days"), hoje - timedelta(days=90)), (t("This year"), hoje.replace(month=1, day=1))]
+        return render_template("estatisticas.html", e=estatisticas.calcular(de, ate, lote), de=de, ate=ate,
+                               lote_sel=lote, atalhos=atalhos, hoje=hoje, dados=dados)
 
     # =====================================================================
     # REVISÃO (FINAL QA SIGN-OFF)

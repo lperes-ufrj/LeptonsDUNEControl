@@ -496,3 +496,61 @@ a.pill:hover { filter: brightness(.95); text-decoration: underline; }
 .cor-5 { --og: #c2185b; --og-fundo: #fbe7ef; }
 .origem-faixas { margin: 2px 0 0; padding: 0; list-style: none; font-size: 13px; }
 .chip-origem .letra { display: inline-block; min-width: 16px; text-align: center; color: #fff; background: var(--og); border-radius: 4px; padding: 0 3px; }
+
+/* ---------- aba Statistics ---------- */
+:root {
+  /* cores das séries dos gráficos (paleta validada para daltonismo; 1-2-3 = Center, Middle, External) */
+  --serie-1: #2a78d6; --serie-2: #eb6834; --serie-3: #1baf7a;
+  --grade-grafico: #e9e9e4; --base-grafico: #c3c2b7;
+}
+.filtros-estat { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin-bottom: 16px; }
+.filtros-estat label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--texto-2); }
+.filtros-estat input, .filtros-estat select { font: inherit; font-weight: 400; padding: 5px 8px; border: 1px solid var(--borda-forte); border-radius: 7px; background: #fff; }
+.filtros-estat select { max-width: 240px; }
+.resumo .val.grande { font-size: 24px; font-weight: 600; line-height: 1.15; }
+.resumo .item .pequeno { margin-top: 4px; }
+.grafico-bloco { margin: 0 0 22px; min-width: 0; }
+.estat-cartao .grade-cartoes, .estat-cartao .dupla { gap: 0 24px; }
+.estat-cartao { padding-bottom: 0; }
+.grafico-bloco figcaption { display: flex; flex-direction: column; gap: 1px; margin-bottom: 6px; }
+.grafico-bloco figcaption b { font-size: 14px; }
+.grafico-bloco figcaption small { color: var(--suave); font-size: 12px; }
+.grafico { position: relative; height: 200px; }
+.grafico svg { display: block; overflow: visible; }
+.grafico .grade { stroke: var(--grade-grafico); stroke-width: 1; }
+.grafico .base { stroke: var(--base-grafico); stroke-width: 1; }
+.grafico .eixo { fill: var(--suave); font: 11px var(--sans); font-variant-numeric: tabular-nums; }
+.grafico .eixo-nome { fill: var(--texto-2); font: 12px var(--sans); }
+.grafico .valor { fill: var(--texto-2); font: 600 12px var(--sans); font-variant-numeric: tabular-nums; }
+.grafico .rotulo-direto { fill: var(--texto-2); font: 600 12px var(--sans); }
+.grafico .rotulo-limite { fill: var(--texto-2); font: 600 11px var(--sans); }
+.grafico .limite { stroke: var(--texto-2); stroke-width: 1; }
+.grafico .marca { transition: opacity .1s; }
+.grafico .marca.realce { opacity: .75; }
+.grafico .linha { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.grafico .ponto { stroke: var(--cartao); stroke-width: 2; }
+.grafico .cruz { stroke: var(--base-grafico); stroke-width: 1; }
+.grafico .alvo { fill: transparent; cursor: default; outline: none; }
+.grafico .alvo:focus-visible { stroke: var(--acento); stroke-width: 1.5; }
+.estat-linha { font-size: 12px; color: var(--texto-2); margin-top: 4px; font-variant-numeric: tabular-nums; }
+.legenda-grafico { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--texto-2); margin: 2px 0 6px; }
+.legenda-grafico span { display: inline-flex; align-items: center; gap: 6px; }
+.legenda-grafico i { display: inline-block; width: 14px; height: 2px; border-radius: 1px; }
+.ver-tabela { margin-top: 6px; font-size: 12px; }
+.ver-tabela summary { cursor: pointer; color: var(--suave); width: fit-content; }
+.ver-tabela table { margin-top: 6px; font-size: 12px; }
+.ver-tabela .rolagem { max-height: 260px; overflow: auto; }
+.sem-dados { display: flex; align-items: center; justify-content: center; height: 120px; color: var(--suave);
+  border: 1px dashed var(--borda-forte); border-radius: 8px; font-size: 13px; }
+.dica-grafico { position: absolute; z-index: 50; pointer-events: none; background: #fff; border: 1px solid var(--borda);
+  border-radius: 8px; box-shadow: 0 4px 14px rgba(0, 0, 0, .12); padding: 7px 10px; font-size: 12px; min-width: 120px; }
+.dica-titulo { color: var(--suave); margin-bottom: 3px; }
+.dica-linha { display: flex; align-items: center; gap: 6px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.dica-linha b { color: var(--texto); }
+.dica-linha span:last-child { color: var(--texto-2); }
+.dica-chave { display: inline-block; width: 12px; height: 2px; border-radius: 1px; }
+@media (max-width: 600px) {
+  .resumo { grid-template-columns: 1fr; }
+  .dupla { grid-template-columns: 1fr; }
+}
+.grafico.alto { height: 260px; }
