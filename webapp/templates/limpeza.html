@@ -3,18 +3,17 @@
 {% macro resultado(r) %}{% if r %}<span class="pill {{ {'Approved': 'es-approved', 'Rejected': 'es-rejected', 'Approved with observations': 'es-partial'}.get(r, 'es-empty') }}">{{ r }}</span>{% else %}<span class="suave">–</span>{% endif %}{% endmacro %}
 {% block conteudo %}
 <div class="trilha">
-  <a href="{{ url_for('lotes_lista') }}">All batches</a>
+  <a href="{{ url_for('lotes_lista') }}">{{ _("All batches") }}</a>
   <span class="sep">›</span><b>Leptons cleaning lots</b>
 </div>
 
 <div class="cabecalho">
   <div>
     <h1>Leptons cleaning lots</h1>
-    <div class="sub">Material that went through PTP removal and a new cleaning at Leptons Lab. Each cleaning lot becomes an
-      internal lot (<span class="mono">{{ chegada.PREFIXO_LIMPEZA }}000X</span>) that can be chosen in the sample form.</div>
+    <div class="sub">{{ _('Material that went through PTP removal and a new cleaning at Leptons Lab. Each cleaning lot becomes an internal lot (<span class="mono">{prefixo}000X</span>) that can be chosen in the sample form.', prefixo=chegada.PREFIXO_LIMPEZA) }}</div>
   </div>
   <div class="acoes">
-    <a class="botao" href="{{ url_for('lotes_limpeza_pdf') }}" target="_blank">Print list (PDF)</a>
+    <a class="botao" href="{{ url_for('lotes_limpeza_pdf') }}" target="_blank">{{ _("Print list (PDF)") }}</a>
   </div>
 </div>
 
@@ -22,31 +21,31 @@
 
 <form class="cartao" method="post" action="{{ url_for('lotes_limpeza_gravar') }}" autocomplete="off" id="form-limpeza">
   <input type="hidden" name="limpeza_id" value="{{ f.id or '' }}">
-  <h2>{% if f.id %}Edit cleaning lot <span class="mono">{{ chegada.PREFIXO_LIMPEZA }}{{ f.num }}</span>{% else %}New cleaning lot{% endif %}</h2>
+  <h2>{% if f.id %}{{ _("Edit cleaning lot") }} <span class="mono">{{ chegada.PREFIXO_LIMPEZA }}{{ f.num }}</span>{% else %}{{ _("New cleaning lot") }}{% endif %}</h2>
   <div class="grade-campos">
-    <label>Cleaning lot code<span class="codigo-caixa"><span class="mono">{{ chegada.PREFIXO_LIMPEZA }}</span><input name="num" value="{{ f.num }}" class="mono" inputmode="numeric" required></span></label>
-    <label>Cleaning date<span class="com-hoje"><input name="data" value="{{ f.data }}" placeholder="DD/MM/YYYY" class="data" required><button type="button" class="botao mini-botao" data-hoje>Today</button></span></label>
-    <label>Responsible<input name="resp" value="{{ f.resp }}" required></label>
-    <label>Number of filters<input name="filtros" value="{{ f.filtros }}" class="num" inputmode="numeric" required></label>
-    <div class="campo-radio"><span>PTP removed?</span>
-      <span class="seg sim-nao">{% for v in ('Yes', 'No') %}<label><input type="radio" name="ptp" value="{{ v }}"{{ ' checked' if f.ptp == v }}><span class="op-{{ v|lower }}">{{ v }}</span></label>{% endfor %}</span></div>
-    <label>Result after cleaning<select name="resultado" required>
+    <label>{{ _("Cleaning lot code") }}<span class="codigo-caixa"><span class="mono">{{ chegada.PREFIXO_LIMPEZA }}</span><input name="num" value="{{ f.num }}" class="mono" inputmode="numeric" required></span></label>
+    <label>{{ _("Cleaning date") }}<span class="com-hoje"><input name="data" value="{{ f.data }}" placeholder="DD/MM/YYYY" class="data" required><button type="button" class="botao mini-botao" data-hoje>{{ _("Today") }}</button></span></label>
+    <label>{{ _("Responsible") }}<input name="resp" value="{{ f.resp }}" required></label>
+    <label>{{ _("Number of filters") }}<input name="filtros" value="{{ f.filtros }}" class="num" inputmode="numeric" required></label>
+    <div class="campo-radio"><span>{{ _("PTP removed?") }}</span>
+      <span class="seg sim-nao">{% for v in ('Yes', 'No') %}<label><input type="radio" name="ptp" value="{{ v }}"{{ ' checked' if f.ptp == v }}><span class="op-{{ v|lower }}">{{ v|tr }}</span></label>{% endfor %}</span></div>
+    <label>{{ _("Result after cleaning") }}<select name="resultado" required>
       {% for r in chegada.RESULTADOS_LIMPEZA %}<option{{ ' selected' if f.resultado == r }}>{{ r }}</option>{% endfor %}
       {% if f.resultado and f.resultado not in chegada.RESULTADOS_LIMPEZA %}<option selected>{{ f.resultado }}</option>{% endif %}</select></label>
   </div>
   <div class="grade-campos duas">
-    <label>Origin (previous PID / lot)<input name="origem" value="{{ f.origem }}"></label>
-    <label>Cleaning procedure<input name="proc" value="{{ f.proc }}"></label>
+    <label>{{ _("Origin (previous PID / lot)") }}<input name="origem" value="{{ f.origem }}"></label>
+    <label>{{ _("Cleaning procedure") }}<input name="proc" value="{{ f.proc }}"></label>
   </div>
-  <label class="bloco-texto">Notes<input name="obs" value="{{ f.obs }}"></label>
+  <label class="bloco-texto">{{ _("Notes") }}<input name="obs" value="{{ f.obs }}"></label>
   <div class="linha-botoes">
-    <button class="botao primario" type="submit">{{ 'Update' if f.id else 'Save' }}</button>
+    <button class="botao primario" type="submit">{{ _('Update') if f.id else _('Save') }}</button>
     {% if f.id %}
-    <a class="botao" href="{{ url_for('lotes_limpeza') }}">New</a>
+    <a class="botao" href="{{ url_for('lotes_limpeza') }}">{{ _("New") }}</a>
     {% if eh_admin %}
     <button type="button" class="botao perigo" data-excluir="{{ url_for('lotes_limpeza_excluir', limpeza_id=f.id) }}"
-            data-titulo="Delete cleaning lot {{ chegada.PREFIXO_LIMPEZA }}{{ f.num }}"
-            data-texto="Depositions that already used it keep the code in their records.">Delete</button>
+            data-titulo="{{ _('Delete cleaning lot {codigo}', codigo=chegada.PREFIXO_LIMPEZA ~ f.num) }}"
+            data-texto="{{ _('Depositions that already used it keep the code in their records.') }}">{{ _("Delete") }}</button>
     {% endif %}
     {% endif %}
   </div>
@@ -54,26 +53,26 @@
 
 <div class="cartao rolagem" style="padding: 6px 8px">
   <table class="tabela-tarefas quebra">
-    <thead><tr><th>ID</th><th>Cleaning lot</th><th>Date</th><th>Responsible</th><th class="num">Filters</th><th>Origin</th>
-      <th>PTP removed</th><th>Procedure</th><th>Result</th><th>Notes</th><th>Samples</th></tr></thead>
+    <thead><tr><th>ID</th><th>Cleaning lot</th><th>{{ _("Date") }}</th><th>{{ _("Responsible") }}</th><th class="num">{{ _("Filters") }}</th><th>{{ _("Origin") }}</th>
+      <th>{{ _("PTP removed") }}</th><th>{{ _("Procedure") }}</th><th>{{ _("Result") }}</th><th>{{ _("Notes") }}</th><th>Samples</th></tr></thead>
     <tbody>
     {% for l in limpezas %}
       {% set link = url_for('lotes_limpeza', edit=l.id) %}
-      <tr onclick="location.href='{{ link }}'" class="{{ 'selecionada' if f.id == l.id }}" title="Click to edit">
+      <tr onclick="location.href='{{ link }}'" class="{{ 'selecionada' if f.id == l.id }}" title="{{ _('Click to edit') }}">
         <td class="id"><a href="{{ link }}">{{ l.id }}</a></td>
         <td class="mono"><b>{{ l.codigo or '–' }}</b></td>
         <td class="mono">{{ l.data or '–' }}</td>
         <td>{{ l.responsavel or '–' }}</td>
         <td class="num mono">{{ l.filtros or '–' }}</td>
         <td>{{ l.origem or '–' }}</td>
-        <td>{% if l.ptp == 'Yes' %}<span class="sim">Yes</span>{% elif l.ptp == 'No' %}<span class="nao">No</span>{% else %}–{% endif %}</td>
+        <td>{% if l.ptp == 'Yes' %}<span class="sim">{{ 'Yes'|tr }}</span>{% elif l.ptp == 'No' %}<span class="nao">{{ 'No'|tr }}</span>{% else %}–{% endif %}</td>
         <td>{{ l.proc or '–' }}</td>
         <td>{{ resultado(l.resultado) }}</td>
         <td>{{ l.obs or '' }}</td>
-        <td>{% for a in usado[l.id] %}<a class="pill st-{{ a.status|lower|replace(' ', '-') }}" href="{{ url_for('tarefa', tarefa_id=a.id) }}" onclick="event.stopPropagation()" title="{{ a.pid or 'no PID yet' }}">Run {{ a.numero or '–' }}</a> {% else %}<span class="suave">–</span>{% endfor %}</td>
+        <td>{% for a in usado[l.id] %}<a class="pill st-{{ a.status|lower|replace(' ', '-') }}" href="{{ url_for('tarefa', tarefa_id=a.id) }}" onclick="event.stopPropagation()" title="{{ a.pid or _('no PID yet') }}">Run {{ a.numero or '–' }}</a> {% else %}<span class="suave">–</span>{% endfor %}</td>
       </tr>
     {% else %}
-      <tr><td colspan="11" class="vazio-tabela">No cleaning lot registered yet.</td></tr>
+      <tr><td colspan="11" class="vazio-tabela">{{ _("No cleaning lot registered yet.") }}</td></tr>
     {% endfor %}
     </tbody>
   </table>

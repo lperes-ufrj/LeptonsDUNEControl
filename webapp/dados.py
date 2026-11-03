@@ -8,6 +8,8 @@ import re
 import sqlite3
 from pathlib import Path
 
+from .i18n import t as tr
+
 BASE = Path(__file__).resolve().parent.parent          # pasta do projeto (logos e programas)
 # pasta dos dados (.db, PDFs, backups...): a do projeto; LEPTONS_DADOS aponta outra (ex.: cópia para testes)
 PASTA = Path(os.environ.get("LEPTONS_DADOS") or BASE).resolve()
@@ -240,62 +242,64 @@ def pendencias(d):
     t, c, te = d["tarefa"], d["cab"], d["ef_teste"]
     falta = []
 
-    def exige(valor, texto):
+    def exige(valor, secao, texto):
         if not str(valor or "").strip():
-            falta.append(texto)
+            falta.append(secao + ": " + tr(texto))
 
-    exige(t.get("codigo_tarefa"), "Deposition: PID")
-    exige(t.get("data_inicio"), "Deposition: deposition date")
-    exige(t.get("responsavel"), "Deposition: responsible")
+    exige(t.get("codigo_tarefa"), "Deposition", "PID")
+    exige(t.get("data_inicio"), "Deposition", "deposition date")
+    exige(t.get("responsavel"), "Deposition", "responsible")
     if not d["lotes"]:
-        falta.append("Deposition: batch / internal lot")
-    exige(t.get("position_range"), "Deposition: position filters")
-    exige(t.get("massa_ptp_g"), "Deposition: PTP mass")
+        falta.append("Deposition: " + tr("batch / internal lot"))
+    exige(t.get("position_range"), "Deposition", "position filters")
+    exige(t.get("massa_ptp_g"), "Deposition", "PTP mass")
     for pos in POSICOES:
         m = d["massas"].get(pos) or {}
         if not (str(m.get("massa_antes") or "").strip() and str(m.get("massa_depois") or "").strip()):
-            falta.append(f"Mass control: position {pos}")
+            falta.append("Mass control: " + tr("position {pos}", pos=pos))
 
     for chave, texto in (("run_evaporation", "run evaporation"), ("inspector", "inspector"),
                          ("pid_p02", "P02 PID"), ("pid_p03", "P03 PID"), ("pid_p14", "P14 PID"),
                          ("data_inspecao", "inspection date"), ("operador", "performed by")):
-        exige(c.get(chave), "Visual inspection: " + texto)
+        exige(c.get(chave), "Visual inspection", texto)
     completos, _, _ = resumo_visual(d)
     if completos < N_FILTROS:
-        falta.append(f"Visual inspection: {N_FILTROS - completos} of {N_FILTROS} filters not fully classified")
+        falta.append("Visual inspection: " + tr("{n} of {total} filters not fully classified",
+                                                n=N_FILTROS - completos, total=N_FILTROS))
 
-    exige(t.get("imersao_data"), "Cryogenic immersion: test date")
-    exige(t.get("imersao_operador"), "Cryogenic immersion: performed by")
+    exige(t.get("imersao_data"), "Cryogenic immersion", "test date")
+    exige(t.get("imersao_operador"), "Cryogenic immersion", "performed by")
     sem_massa = [a for a in AMOSTRAS if not (d["im_massas"].get(a) or {}).get("aprovado")]
     if sem_massa:
-        falta.append("Cryogenic immersion: masses of " + ", ".join(sem_massa))
+        falta.append("Cryogenic immersion: " + tr("masses of {amostras}", amostras=", ".join(sem_massa)))
     sem_item = [chave for chave, *_ in ITENS_IMERSAO if not d["im_itens"].get(chave)]
     if sem_item:
-        falta.append(f"Cryogenic immersion: {len(sem_item)} of {len(ITENS_IMERSAO)} post-immersion checks")
+        falta.append("Cryogenic immersion: " + tr("{n} of {total} post-immersion checks",
+                                                  n=len(sem_item), total=len(ITENS_IMERSAO)))
 
     for chave, texto in (("data_teste", "test date"), ("ref_id", "reference substrate ID"),
                          ("ref_data", "reference installation date"), ("temperatura_c", "room temperature"),
                          ("umidade_pct", "relative humidity"), ("operador", "performed by")):
-        exige(te.get(chave), "Optical efficiency: " + texto)
+        exige(te.get(chave), "Optical efficiency", texto)
     testadas = 0
     for amostra in AMOSTRAS:
         r = d["ef_amostras"].get(amostra) or {}
         if r.get("testada") == "No":
             continue
         if r.get("testada") != "Yes":
-            falta.append(f"Optical efficiency: {amostra} – Tested? not answered")
+            falta.append(f"Optical efficiency: {amostra} – " + tr("Tested? not answered"))
             continue
         testadas += 1
-        faltam = [nome for chave, nome in (("massa_antes", "mass before"), ("massa_depois", "mass after"))
+        faltam = [tr(nome) for chave, nome in (("massa_antes", "mass before"), ("massa_depois", "mass after"))
                   if not str(r.get(chave) or "").strip()]
         if not area_amostra_ef(r):
-            faltam.append("area")
+            faltam.append(tr("area"))
         if not str(r.get("eficiencia") or "").strip():
-            faltam.append("relative efficiency")
+            faltam.append(tr("relative efficiency"))
         if faltam:
             falta.append(f"Optical efficiency: {amostra} – " + ", ".join(faltam))
     if testadas < MIN_AMOSTRAS_EFICIENCIA:
-        falta.append(f"Optical efficiency: at least {MIN_AMOSTRAS_EFICIENCIA} tested samples")
+        falta.append("Optical efficiency: " + tr("at least {n} tested samples", n=MIN_AMOSTRAS_EFICIENCIA))
     return falta
 
 

@@ -6,6 +6,7 @@ banco de dados (ex.: um servidor central): cada passo devolve um texto curto que
 import sqlite3
 
 from . import dados
+from .i18n import t
 
 
 def ao_entrar(usuario):
@@ -16,7 +17,7 @@ def ao_entrar(usuario):
         n = con.execute("SELECT COUNT(*) FROM tarefas").fetchone()[0]
     finally:
         con.close()
-    passos.append(f"{n} deposition samples found")
+    passos.append(t("{n} deposition samples found", n=n))
     if dados.DB_LOTES.exists():
         try:
             con = dados._conectar(dados.DB_LOTES)
@@ -24,10 +25,10 @@ def ao_entrar(usuario):
                 n_lotes = con.execute("SELECT COUNT(*) FROM lotes").fetchone()[0]
             finally:
                 con.close()
-            passos.append(f"{n_lotes} batch(es) in the batch database")
+            passos.append(t("{n} batch(es) in the batch database", n=n_lotes))
         except sqlite3.Error:
-            passos.append("Batch database not readable")
+            passos.append(t("Batch database not readable"))
     else:
-        passos.append("Batch database not found")
+        passos.append(t("Batch database not found"))
     # futuro: sincronizar com o banco de dados central aqui
     return passos

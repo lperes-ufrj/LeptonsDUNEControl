@@ -15,6 +15,7 @@ import zipfile
 from datetime import datetime
 from functools import lru_cache, wraps
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from flask import (Flask, Response, abort, flash, redirect, render_template, request, send_file, send_from_directory,
                    session, url_for)
@@ -23,11 +24,12 @@ from werkzeug.utils import secure_filename
 
 import leptons_auth
 
-from . import backup, banco, chegada, dados, inicio, lotes, pdf, planilha, relatorio, tarefas
+from . import backup, banco, chegada, dados, i18n, inicio, lotes, pdf, planilha, relatorio, tarefas
+from .i18n import t
 
 LOGOS = ("esquerda.png", "direita.png")
 PROGRAMA = "Deposition Control (browser)"
-LIVRES = {"login", "static", "logo", "sair"}         # páginas que abrem sem login
+LIVRES = {"login", "static", "logo", "sair", "trocar_idioma"}   # páginas que abrem sem login
 PERFIS_REVISORES = ("Admin",)                        # quem pode marcar uma tarefa como revisada
 PASTA_JSON = dados.PASTA / "tarefas_json"
 PASTA_ANEXOS = dados.PASTA / "anexos"
@@ -78,20 +80,20 @@ def criar_app():
         if not revisada or eh_admin():
             return None
         registrar("EDIT_DENIED", f"id={tarefa_id} {o_que}: signed off, not an Admin")
-        return (f"This sample was signed off (Final QA) by {revisada[0]} on {revisada[1] or '-'}. "
-                "Only an Admin can change a completed sample.")
+        return t("This sample was signed off (Final QA) by {por} on {data}. Only an Admin can change a completed sample.",
+                 por=revisada[0], data=revisada[1] or "-")
 
     def confirmar_exclusao(o_que, voltar):
         """Só um Admin exclui, e confirma com a própria senha. None = pode excluir; senão a resposta a devolver."""
         if not eh_admin():
             registrar("DELETE_DENIED", f"{o_que}: not an Admin")
-            return erro_pagina("Only an Admin can delete records.", 403)
+            return erro_pagina(t("Only an Admin can delete records."), 403)
         ok, msg, _u = leptons_auth.autenticar(usuario()["username"], request.form.get("senha", ""))
         if ok:
             return None
         registrar("DELETE_DENIED", f"{o_que}: wrong password")
-        flash("Password not confirmed – nothing was deleted. "
-              + (msg if "attempts" in msg else "The password is incorrect."), "erro")
+        flash(t("Password not confirmed – nothing was deleted.") + " "
+              + t(msg if "attempts" in msg else "The password is incorrect."), "erro")
         return redirect(voltar)
 
     @app.before_request
@@ -119,23 +121,28 @@ def criar_app():
     def basename(caminho):
         return os.path.basename(str(caminho).replace("\\", "/"))
 
+    app.add_template_global(i18n.tj, "_")
+    app.template_filter("tr")(i18n.tr)
+
     @app.context_processor
     def globais():
         return {"STATUS_TODOS": dados.STATUS_TODOS, "TXT_ESTADO": dados.TXT_ESTADO, "N_FILTROS": dados.N_FILTROS,
                 "agora": datetime.now().strftime("%Y-%m-%d %H:%M"), "usuario": usuario(), "eh_admin": eh_admin(),
-                "min_senha": leptons_auth.MIN_SENHA, "chegada_resultados": chegada.RESULTADOS}
+                "min_senha": leptons_auth.MIN_SENHA, "chegada_resultados": chegada.RESULTADOS,
+                "idioma": i18n.idioma(), "textos_js": i18n.textos_js(),
+                "aqui": request.full_path.rstrip("?") if request.method == "GET" else ""}
 
     def lateral(tarefas_, st="", lote=None, interno="", q=""):
         """Barra lateral (situações e árvore lote OPTO -> lote interno, com o nº de tarefas) e a seleção atual."""
         grupos = {}
-        for t in tarefas_:
-            for l in t["lotes"] or [{"opto": "", "interno": ""}]:
+        for tf in tarefas_:
+            for l in tf["lotes"] or [{"opto": "", "interno": ""}]:
                 grupo = grupos.setdefault(l["opto"] or "", {"total": 0, "internos": {}})
                 grupo["total"] += 1
                 if l["interno"]:
                     grupo["internos"][l["interno"]] = grupo["internos"].get(l["interno"], 0) + 1
         return {"arvore": sorted(grupos.items(), key=lambda kv: (kv[0] == "", kv[0])), "total": len(tarefas_),
-                "contagem": {s: sum(1 for t in tarefas_ if t["status"] == s) for s in dados.STATUS_TODOS},
+                "contagem": {s: sum(1 for tf in tarefas_ if tf["status"] == s) for s in dados.STATUS_TODOS},
                 "st": st, "lote": lote, "interno": interno, "q": q}
 
     def id_mostrado(tarefa_id):
@@ -146,9 +153,10 @@ def criar_app():
     def texto_status(status, pend):
         """Mensagem mostrada depois de gravar a tarefa."""
         if status == dados.STATUS_INCOMPLETO:
-            return f"Status: {status} – {len(pend)} item(s) of information still missing (listed on the sample page)."
+            return t("Status: {status} – {n} item(s) of information still missing (listed on the sample page).",
+                     status=status, n=len(pend))
         if status == dados.STATUS_REVISAR:
-            return f"Status: {status} – all the information is filled. An Admin can now review it."
+            return t("Status: {status} – all the information is filled. An Admin can now review it.", status=status)
         return f"Status: {status}"
 
     # =====================================================================
@@ -272,16 +280,16 @@ def criar_app():
         outras = tarefas.outras_com_run(f)
         if outras and "1" not in request.form.getlist("confirmar_run"):
             return formulario(f, importacao=token, confirmar_run=True, avisos=[
-                f"ID {dados.numero_run(f['run'])} (run {f['run']}) is already used by another sample ({len(outras)}). "
-                "The ID comes from the run number, so two samples would show the same ID. "
-                "Click Save anyway to keep it."]), 409
+                t("ID {n} (run {run}) is already used by another sample ({outras}). The ID comes from the run number, so two "
+                  "samples would show the same ID. Click Save anyway to keep it.",
+                  n=dados.numero_run(f["run"]), run=f["run"], outras=len(outras))]), 409
 
         revisada = tarefas.revisao_gravada(tarefa_id)
         if revisada:
             # tarefa já revisada (só um Admin chega aqui): qualquer alteração exige um novo Final QA sign-off
             if "1" not in request.form.getlist("confirmar_revisao"):
                 return formulario(f, importacao=token, avisos=[
-                    "This sample was signed off. Saving removes the Final QA sign-off; confirm when saving."]), 409
+                    t("This sample was signed off. Saving removes the Final QA sign-off; confirm when saving.")]), 409
             f["signoff"] = {"por": "", "data": ""}
             registrar("TASK_REVIEW_CLEARED", f"id={tarefa_id} PID={f['pid']} "
                                              f"(was reviewed by {revisada[0]} on {revisada[1]})")
@@ -297,7 +305,7 @@ def criar_app():
         registrar("TASK_CREATE" if nova else "TASK_UPDATE", f"id={tarefa_id} PID={f['pid']} status={status}")
         if imp is not None:
             _IMPORTACOES.pop(token, None)
-        flash(("Sample saved. " if nova else "Sample updated. ") + texto_status(status, pend),
+        flash((t("Sample saved.") if nova else t("Sample updated.")) + " " + texto_status(status, pend),
               "ok" if status != dados.STATUS_INCOMPLETO else "aviso")
         return redirect(url_for("tarefa", tarefa_id=tarefa_id))
 
@@ -313,7 +321,7 @@ def criar_app():
         if pid is None:
             abort(404)
         registrar("TASK_DELETE", f"id={tarefa_id} PID={pid}")
-        flash(f"Sample ID {numero} ({pid or '-'}) deleted.", "ok")
+        flash(t("Sample ID {n} ({pid}) deleted.", n=numero, pid=pid or "-"), "ok")
         return redirect(url_for("lista"))
 
     @app.route("/sample/<int:tarefa_id>/attachment")
@@ -428,7 +436,8 @@ def criar_app():
         novo = f["id"] is None
         lote_id, tracking = chegada.gravar(f, f["id"])
         registrar("BATCH_CREATE" if novo else "BATCH_UPDATE", f"id={lote_id} {tracking} OPTO batch={f['lote_geral']}")
-        flash(f"Batch {f['lote_geral']} ({tracking}) " + ("saved." if novo else "updated."), "ok")
+        flash(t("Batch {lote} ({tracking}) saved." if novo else "Batch {lote} ({tracking}) updated.",
+                lote=f["lote_geral"], tracking=tracking), "ok")
         return redirect(url_for("lote", lote_id=lote_id))
 
     @app.route("/batch/<int:lote_id>/delete", methods=["POST"])
@@ -442,7 +451,7 @@ def criar_app():
         if info is None:
             abort(404)
         registrar("BATCH_DELETE", f"id={lote_id} {info[0]} OPTO batch={info[1]}")
-        flash(f"Batch {info[1] or '-'} ({info[0] or 'ID ' + str(lote_id)}) deleted.", "ok")
+        flash(t("Batch {lote} ({tracking}) deleted.", lote=info[1] or "-", tracking=info[0] or "ID " + str(lote_id)), "ok")
         return redirect(url_for("lotes_lista"))
 
     @app.route("/batch/<int:lote_id>/report.pdf")
@@ -456,7 +465,7 @@ def criar_app():
         try:
             chegada.gerar_pdf_lote(lote_id, str(caminho))
         except PermissionError:
-            return erro_pagina(f"Could not write the file. Close the PDF if it is open and try again: {caminho}")
+            return erro_pagina(t("Could not write the file. Close the PDF if it is open and try again: {caminho}", caminho=caminho))
         return send_file(str(caminho), mimetype="application/pdf", download_name=nome)
 
     @app.route("/batches.csv")
@@ -490,7 +499,7 @@ def criar_app():
             return pagina_limpeza(f, erro), 400
         chegada.gravar_limpeza(f, codigo)
         registrar("CLEANING_LOT_SAVE", codigo)
-        flash(f"Cleaning lot {codigo} saved.", "ok")
+        flash(t("Cleaning lot {codigo} saved.", codigo=codigo), "ok")
         return redirect(url_for("lotes_limpeza"))
 
     @app.route("/batches/cleaning/<int:limpeza_id>/delete", methods=["POST"])
@@ -504,7 +513,7 @@ def criar_app():
         if codigo is None:
             abort(404)
         registrar("CLEANING_LOT_DELETE", codigo)
-        flash(f"Cleaning lot {codigo} deleted. Depositions that already used it keep the code in their records.", "ok")
+        flash(t("Cleaning lot {codigo} deleted. Depositions that already used it keep the code in their records.", codigo=codigo), "ok")
         return redirect(url_for("lotes_limpeza"))
 
     @app.route("/batches/cleaning.pdf")
@@ -514,7 +523,7 @@ def criar_app():
         try:
             chegada.gerar_pdf_limpeza(str(caminho))
         except PermissionError:
-            return erro_pagina(f"Could not write the file. Close the PDF if it is open and try again: {caminho}")
+            return erro_pagina(t("Could not write the file. Close the PDF if it is open and try again: {caminho}", caminho=caminho))
         return send_file(str(caminho), mimetype="application/pdf", download_name=caminho.name)
 
     # =====================================================================
@@ -528,13 +537,14 @@ def criar_app():
         pode = usuario()["perfil"] in PERFIS_REVISORES
         if request.method == "POST":
             if not pode:
-                flash("Only " + " or ".join(PERFIS_REVISORES) + " users can review samples.", "erro")
+                flash(t("Only {perfis} users can review samples.", perfis=t(" or ").join(PERFIS_REVISORES)), "erro")
             elif d["status"] != dados.STATUS_REVISAR:
-                flash("This sample is not ready for review (or was already reviewed).", "erro")
+                flash(t("This sample is not ready for review (or was already reviewed)."), "erro")
             else:
                 tarefas.marcar_revisada(tarefa_id, nome_usuario())
                 registrar("TASK_REVIEWED", f"id={tarefa_id} PID={d['tarefa'].get('codigo_tarefa') or ''}")
-                flash(f"Sample {d['tarefa'].get('codigo_tarefa') or ''} reviewed – status: {dados.STATUS_COMPLETO}.", "ok")
+                flash(t("Sample {pid} reviewed – status: {status}.", pid=d["tarefa"].get("codigo_tarefa") or "",
+                        status=dados.STATUS_COMPLETO), "ok")
                 return redirect(url_for("tarefa", tarefa_id=tarefa_id))
         return render_template("revisar.html", d=d, t=d["tarefa"], pode_revisar=pode, perfis=PERFIS_REVISORES,
                                nome=nome_usuario(), hoje=tarefas.hoje())
@@ -560,7 +570,7 @@ def criar_app():
         try:
             pdf.gerar_pdf_relatorio(tarefa_id, str(caminho))
         except PermissionError:
-            return erro_pagina(f"Could not write the file. Close the PDF if it is open and try again: {caminho}")
+            return erro_pagina(t("Could not write the file. Close the PDF if it is open and try again: {caminho}", caminho=caminho))
         return send_file(str(caminho), mimetype="application/pdf", download_name=nome)
 
     @app.route("/sample/<int:tarefa_id>/qr")
@@ -570,14 +580,14 @@ def criar_app():
             abort(404)
         if relatorio.URL_BASE_RELATORIO:
             pasta = relatorio.gerar_arquivos_relatorio(tarefa_id)
-            aviso = (f"Report files saved in: {pasta}. Publish this folder at {relatorio.URL_BASE_RELATORIO} "
-                     "so the QR link works.")
+            aviso = t("Report files saved in: {pasta}. Publish this folder at {url} so the QR link works.",
+                      pasta=pasta, url=relatorio.URL_BASE_RELATORIO)
         elif servidor_relatorios_ativo():
-            aviso = ("The link works on devices connected to the same network as this computer, while this program "
-                     "is open. If it does not open, allow Python through the firewall for private networks.")
+            aviso = t("The link works on devices connected to the same network as this computer, while this program "
+                      "is open. If it does not open, allow Python through the firewall for private networks.")
         else:
-            aviso = (f"The report server could not start on port {relatorio.SERVIDOR_PORTA} (port in use – is the "
-                     "desktop program open? It serves the same links while it is open).")
+            aviso = t("The report server could not start on port {porta} (port in use – is the desktop program open? "
+                      "It serves the same links while it is open).", porta=relatorio.SERVIDOR_PORTA)
         return render_template("qr.html", d=d, url=relatorio.url_relatorio(tarefa_id), aviso=aviso)
 
     @app.route("/sample/<int:tarefa_id>/qr.png")
@@ -646,11 +656,11 @@ def criar_app():
             return render_template("importar.html")
         arq = request.files.get("arquivo")
         if not arq or not arq.filename:
-            return render_template("importar.html", erro="Choose a .json file."), 400
+            return render_template("importar.html", erro=t("Choose a .json file.")), 400
         try:
             d = tarefas.ler_json(arq.read().decode("utf-8-sig"))
         except (ValueError, UnicodeDecodeError) as e:
-            return render_template("importar.html", erro="Could not read the file: " + str(e)), 400
+            return render_template("importar.html", erro=t("Could not read the file: ") + str(e)), 400
         token = secrets.token_urlsafe(12)
         pid = str(d["task"].get("codigo_tarefa") or "").strip()
         _IMPORTACOES[token] = {"dados": d, "arquivo": secure_filename(arq.filename) or "sample.json", "pid": pid}
@@ -666,29 +676,30 @@ def criar_app():
     def formulario_importado(token):
         imp = _IMPORTACOES.get(token)
         if imp is None:
-            flash("The imported file is no longer available – import it again.", "erro")
+            flash(t("The imported file is no longer available – import it again."), "erro")
             return redirect(url_for("importar_json"))
         destino = request.args.get("into", type=int)
         if destino is not None and destino not in tarefas.tarefas_com_pid(imp["pid"]):
             abort(404)
         bloqueio = edicao_bloqueada(destino, "import .json")
         if bloqueio:
-            flash(bloqueio + " Import it as a new sample instead.", "erro")
+            flash(bloqueio + " " + t("Import it as a new sample instead."), "erro")
             return redirect(url_for("importar_json"))
         try:
             f = tarefas.formulario_do_json(imp["dados"])
         except Exception as e:
-            flash("Could not load the sample from the file: " + str(e), "erro")
+            flash(t("Could not load the sample from the file: ") + str(e), "erro")
             return redirect(url_for("importar_json"))
         imp["signoff"] = f["signoff"]
         f["id"] = destino
         registrar("TASK_IMPORT_JSON", f"PID={imp['pid']} file={imp['arquivo']} "
                                       f"into={'new' if destino is None else 'id=' + str(destino)}")
-        avisos = [f"Sample {imp['pid'] or '-'} loaded from {imp['arquivo']}. Review the data, then click "
-                  + ("Save to create it." if destino is None else f"Save to overwrite sample ID {id_mostrado(destino)}.")]
+        avisos = [t("Sample {pid} loaded from {arquivo}. Review the data, then click Save to create it." if destino is None
+                    else "Sample {pid} loaded from {arquivo}. Review the data, then click Save to overwrite sample ID {n}.",
+                    pid=imp["pid"] or "-", arquivo=imp["arquivo"], n=id_mostrado(destino) if destino is not None else "")]
         ausentes = tarefas.lotes_ausentes(imp["dados"])
         if ausentes:
-            avisos.append("These batches are not registered on this computer (they are kept with their codes): "
+            avisos.append(t("These batches are not registered on this computer (they are kept with their codes): ")
                           + ", ".join(ausentes))
         return formulario(f, avisos=avisos, importacao=token)
 
@@ -711,13 +722,13 @@ def criar_app():
             elif caminho_txt:
                 caminho, nome = Path(caminho_txt).expanduser(), os.path.basename(caminho_txt)
                 if not caminho.is_file():
-                    return render_template("sync.html", ultimo=ultimo, erro=f"File not found: {caminho_txt}"), 400
+                    return render_template("sync.html", ultimo=ultimo, erro=t("File not found: {caminho}", caminho=caminho_txt)), 400
             else:
-                return render_template("sync.html", ultimo=ultimo, erro="Choose the spreadsheet file."), 400
+                return render_template("sync.html", ultimo=ultimo, erro=t("Choose the spreadsheet file.")), 400
             try:
                 abas, linhas_ef, deps = planilha.ler_planilha(str(caminho))
             except Exception as e:
-                return render_template("sync.html", ultimo=ultimo, erro="Could not read the spreadsheet: " + str(e)), 400
+                return render_template("sync.html", ultimo=ultimo, erro=t("Could not read the spreadsheet: ") + str(e)), 400
         finally:
             if temporario is not None and temporario.exists():
                 temporario.unlink()
@@ -725,8 +736,8 @@ def criar_app():
             banco.gravar_config("planilha_eficiencia", str(caminho))
         mudancas, n_tarefas = planilha.mudancas_planilha(linhas_ef, deps)
         if not mudancas:
-            flash(f"Everything is up to date: no differences between {', '.join(abas)} and the {n_tarefas} saved samples.",
-                  "ok")
+            flash(t("Everything is up to date: no differences between {abas} and the {n} saved samples.",
+                    abas=", ".join(abas), n=n_tarefas), "ok")
             return redirect(url_for("lista"))
         token = secrets.token_urlsafe(12)
         _SINCRONIZACOES[token] = {"mudancas": mudancas, "arquivo": nome}
@@ -745,7 +756,7 @@ def criar_app():
     def aplicar_sincronizacao():
         sinc = _SINCRONIZACOES.pop(request.form.get("token", ""), None)
         if sinc is None:
-            flash("These changes were already applied or expired – run the sync again.", "erro")
+            flash(t("These changes were already applied or expired – run the sync again."), "erro")
             return redirect(url_for("sincronizar"))
         mudancas, puladas = sinc["mudancas"], []
         if not eh_admin():            # amostras revisadas (Completed): só um Admin altera
@@ -755,9 +766,10 @@ def criar_app():
                 registrar("EDIT_DENIED", f"sheet sync: {', '.join(puladas)} signed off, not an Admin")
         n, criadas = planilha.aplicar_mudancas_planilha(mudancas, sinc["arquivo"], registrar,
                                                         bool(request.form.get("criar_novas")))
-        flash(f"Synced from {sinc['arquivo']}: {n} change(s) applied"
-              + (f", {criadas} new sample(s) created" if criadas else "") + "."
-              + (f" Not changed (signed off – only an Admin can change them): {', '.join(puladas)}." if puladas else ""),
+        flash(t("Synced from {arquivo}: {n} change(s) applied", arquivo=sinc["arquivo"], n=n)
+              + (t(", {n} new sample(s) created", n=criadas) if criadas else "") + "."
+              + (" " + t("Not changed (signed off – only an Admin can change them): {runs}.", runs=", ".join(puladas))
+                 if puladas else ""),
               "aviso" if puladas else "ok")
         return redirect(url_for("lista"))
 
@@ -773,11 +785,11 @@ def criar_app():
         except Exception as e:
             criados, erros = [], [str(e)]
         if criados:
-            flash(f"Backup saved in {backup.PASTA_BACKUP}: " + ", ".join(os.path.basename(c) for c in criados), "ok")
+            flash(t("Backup saved in {pasta}: ", pasta=backup.PASTA_BACKUP) + ", ".join(os.path.basename(c) for c in criados), "ok")
         for e in erros:
-            flash("Backup warning: " + e, "erro")
+            flash(t("Backup warning: ") + e, "erro")
         if not criados and not erros:
-            flash("No database found to back up.", "aviso")
+            flash(t("No database found to back up."), "aviso")
         return redirect(request.referrer or url_for("lista"))
 
     # =====================================================================
@@ -793,10 +805,10 @@ def criar_app():
                     "The new passwords do not match." if f.get("nova") != f.get("nova2") else
                     leptons_auth.validar_senha(f.get("nova", ""), u["username"]))
             if erro:
-                return render_template("senha.html", erro=erro), 400
+                return render_template("senha.html", erro=t(erro)), 400
             leptons_auth.definir_senha(u["id"], f["nova"], trocar_senha=False, username=u["username"])
             registrar("PASSWORD_CHANGE")
-            flash("Password changed.", "ok")
+            flash(t("Password changed."), "ok")
             return redirect(url_for("lista"))
         return render_template("senha.html")
 
@@ -811,14 +823,14 @@ def criar_app():
         f = request.form
         try:
             if f.get("senha") != f.get("senha2"):
-                raise ValueError("The passwords do not match.")
+                raise ValueError(t("The passwords do not match."))
             leptons_auth.criar_usuario(f.get("username"), f.get("nome"), f.get("perfil"), f.get("senha", ""),
                                        trocar_senha=True)
         except ValueError as e:
-            flash(str(e), "erro")
+            flash(t(str(e)), "erro")
             return redirect(url_for("usuarios"))
         registrar("USER_CREATE", f"{f.get('username', '').strip()} ({f.get('perfil')})")
-        flash("User created. The person must choose a new password at the first login.", "ok")
+        flash(t("User created. The person must choose a new password at the first login."), "ok")
         return redirect(url_for("usuarios"))
 
     def _usuario_por_id(user_id):
@@ -835,12 +847,12 @@ def criar_app():
         try:
             leptons_auth.alterar_usuario(user_id, nome=novo_nome, perfil=novo_perfil)
         except ValueError as e:
-            flash(str(e), "erro")
+            flash(t(str(e)), "erro")
             return redirect(url_for("usuarios"))
         registrar("USER_UPDATE", f"{user}: {nome}/{perfil} -> {novo_nome or nome}/{novo_perfil}")
         if user_id == usuario()["id"]:
             session["usuario"] = dict(usuario(), nome=novo_nome or nome, perfil=novo_perfil)
-        flash(f"User {user} updated.", "ok")
+        flash(t("User {user} updated.", user=user), "ok")
         return redirect(url_for("usuarios"))
 
     @app.route("/users/<int:user_id>/reset", methods=["POST"])
@@ -851,11 +863,11 @@ def criar_app():
         erro = ("The passwords do not match." if f.get("senha") != f.get("senha2")
                 else leptons_auth.validar_senha(f.get("senha", ""), user))
         if erro:
-            flash(f"{user}: {erro}", "erro")
+            flash(f"{user}: {t(erro)}", "erro")
             return redirect(url_for("usuarios"))
         leptons_auth.definir_senha(user_id, f["senha"], trocar_senha=True, username=user)
         registrar("PASSWORD_RESET", user)
-        flash(f"Temporary password set for {user}. The user must change it at the next login.", "ok")
+        flash(t("Temporary password set for {user}. The user must change it at the next login.", user=user), "ok")
         return redirect(url_for("usuarios"))
 
     @app.route("/users/<int:user_id>/toggle", methods=["POST"])
@@ -863,15 +875,15 @@ def criar_app():
     def ativar_desativar(user_id):
         _id, user, _nome, _perfil, ativo, _ult = _usuario_por_id(user_id)
         if user_id == usuario()["id"] and ativo:
-            flash("You cannot deactivate your own account.", "erro")
+            flash(t("You cannot deactivate your own account."), "erro")
             return redirect(url_for("usuarios"))
         try:
             leptons_auth.alterar_usuario(user_id, ativo=not ativo)
         except ValueError as e:
-            flash(str(e), "erro")
+            flash(t(str(e)), "erro")
             return redirect(url_for("usuarios"))
         registrar("USER_DEACTIVATE" if ativo else "USER_ACTIVATE", user)
-        flash(f"User {user} {'deactivated' if ativo else 'activated'}.", "ok")
+        flash(t("User {user} deactivated." if ativo else "User {user} activated.", user=user), "ok")
         return redirect(url_for("usuarios"))
 
     def linhas_auditoria(termo):
@@ -932,7 +944,7 @@ def criar_app():
         if not ok:
             leptons_auth.registrar_como({"id": None, "username": username, "nome": "", "perfil": ""},
                                         "LOGIN_FAILED", msg)
-            return render_template("login.html", proxima=proxima, username=username, erro=msg), 401
+            return render_template("login.html", proxima=proxima, username=username, erro=t(msg)), 401
         if u["trocar_senha"]:
             if "nova" not in f:
                 return render_template("login.html", proxima=proxima, username=username, trocar=True,
@@ -942,7 +954,7 @@ def criar_app():
                     leptons_auth.validar_senha(f["nova"], u["username"]))
             if erro:
                 return render_template("login.html", proxima=proxima, username=username, trocar=True,
-                                       senha=f.get("senha", ""), erro=erro), 400
+                                       senha=f.get("senha", ""), erro=t(erro)), 400
             leptons_auth.definir_senha(u["id"], f["nova"], trocar_senha=False, username=u["username"])
             leptons_auth.registrar_como(u, "PASSWORD_CHANGE", "first access / temporary password")
         session.clear()
@@ -962,9 +974,21 @@ def criar_app():
     def api_entrando():
         """Passos feitos ao entrar (hoje: conferir os bancos; no futuro: sincronizar com o banco de dados)."""
         try:
-            return {"ok": True, "passos": inicio.ao_entrar(usuario())}
+            return {"ok": True, "passos": [t(p) for p in inicio.ao_entrar(usuario())]}
         except Exception as e:
             return {"ok": False, "erro": str(e)}, 500
+
+    @app.route("/language/<cod>")
+    def trocar_idioma(cod):
+        """Botões EN | PT: guarda o idioma no navegador (1 ano) e volta para a mesma página."""
+        proxima = request.args.get("proxima", "")
+        if not proxima.startswith("/") or proxima.startswith("//"):
+            ref = urlsplit(request.referrer or "")
+            proxima = (ref.path + ("?" + ref.query if ref.query else "")) if ref.netloc == request.host else ""
+        resp = redirect(proxima or url_for("lista"))
+        if cod in i18n.IDIOMAS:
+            resp.set_cookie(i18n.COOKIE, cod, max_age=365 * 24 * 3600, httponly=True, samesite="Lax")
+        return resp
 
     @app.route("/logout", methods=["POST"])
     def logout():
@@ -986,11 +1010,11 @@ def criar_app():
 
     @app.errorhandler(403)
     def proibido(_e):
-        return erro_pagina("Only an Admin can open this page.", 403)
+        return erro_pagina(t("Only an Admin can open this page."), 403)
 
     @app.errorhandler(404)
     def nao_achado(_e):
-        return erro_pagina("Not found.", 404)
+        return erro_pagina(t("Not found."), 404)
 
     return app
 

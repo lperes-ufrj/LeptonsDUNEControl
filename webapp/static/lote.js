@@ -48,7 +48,7 @@
     const calc = $("#calculo");
     if (cap == null || n === 0) {
       el.total_filtros.value = "";
-      calc.textContent = "Enter the capacity and the number of small boxes.";
+      calc.textContent = T("Enter the capacity and the number of small boxes.");
     } else {
       let total = 0, iguais = true;
       linhas().forEach((tr) => {
@@ -57,8 +57,8 @@
         if (v !== String(cap)) iguais = false;
       });
       el.total_filtros.value = total;
-      calc.textContent = iguais ? `${n} small box(es) × ${cap} filters = ${total} filters.`
-                                : `${n} small box(es), ${total} filters (custom count in some boxes).`;
+      calc.textContent = iguais ? T("{n} small box(es) × {cap} filters = {total} filters.", { n, cap, total })
+                                : T("{n} small box(es), {total} filters (custom count in some boxes).", { n, total });
     }
     estadoInternos();
   }
@@ -67,7 +67,7 @@
     const n = linhas().length;
     const feitos = linhas().filter((tr) => campo(tr, "num").value.trim()).length;
     const e = $("#estado-internos");
-    e.textContent = n ? `Internal lots: ${feitos}/${n} registered` : "Internal lots: –";
+    e.textContent = n ? T("Internal lots: {n}/{total} registered", { n: feitos, total: n }) : "Internal lots: –";
     e.className = !n ? "suave" : feitos === n ? "sim" : "nao";
     const opto = el.lote_geral.value.trim();
     $$("[data-opto]", corpo).forEach((td) => (td.textContent = opto || "–"));
@@ -105,20 +105,20 @@
   let alterado = false;
   function sujo(v) {
     alterado = v;
-    $("#estado-form").textContent = v ? "Unsaved changes" : "No unsaved changes";
+    $("#estado-form").textContent = v ? T("Unsaved changes") : T("No unsaved changes");
     $("#estado-form").className = v ? "nao" : "suave";
   }
   form.addEventListener("input", () => sujo(true));
   form.addEventListener("change", () => sujo(true));
   form.addEventListener("submit", (e) => {
     const n = inteiro(el.numero_caixas_menores.value);
-    if (!el.lote_geral.value.trim()) { e.preventDefault(); alert("Enter the OPTO batch first."); el.lote_geral.focus(); return; }
-    if (!n) { e.preventDefault(); alert("Enter the number of small boxes."); el.numero_caixas_menores.focus(); return; }
+    if (!el.lote_geral.value.trim()) { e.preventDefault(); alert(T("Enter the OPTO batch first.")); el.lote_geral.focus(); return; }
+    if (!n) { e.preventDefault(); alert(T("Enter the number of small boxes.")); el.numero_caixas_menores.focus(); return; }
     alterado = false;
   });
   window.addEventListener("beforeunload", (e) => { if (alterado) { e.preventDefault(); e.returnValue = ""; } });
   $$("[data-sair]").forEach((a) => a.addEventListener("click", (e) => {
-    if (alterado && !confirm("Leave without saving? The changes will be lost.")) e.preventDefault();
+    if (alterado && !confirm(T("Leave without saving? The changes will be lost."))) e.preventDefault();
     else alterado = false;
   }));
 

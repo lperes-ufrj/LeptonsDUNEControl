@@ -11,6 +11,7 @@ from datetime import datetime
 from PIL import Image, ImageChops
 
 from . import banco, dados, pdf
+from .i18n import t
 
 PREFIXO_CAIXA = "DUNE-CX-"            # caixas menores (lotes internos): DUNE-CX-0001, DUNE-CX-0002, ...
 PREFIXO_LIMPEZA = "DUNE-LP-"          # lotes de limpeza realizada no Leptons
@@ -229,9 +230,9 @@ def de_formulario(form):
         else:
             codigo = ""
             if numero:
-                erros.append(f"Box {i:02d}: type only the number (digits), e.g. 0004.")
+                erros.append(t("Box {i:02d}: type only the number (digits), e.g. 0004.", i=i))
         if filtros and not filtros.isdigit():
-            erros.append(f"Filters in box {i:02d} must be an integer.")
+            erros.append(t("Filters in box {i:02d} must be an integer.", i=i))
         f["internos"].append({"caixa": i, "codigo": codigo, "num": numero, "orig": original, "filtros": filtros,
                               "obs": form.get(f"cx_obs_{i}", "").strip()})
     f["erros_caixas"] = erros
@@ -249,7 +250,8 @@ def conflito_codigos(itens):
         if not codigo:
             continue
         if codigo.lower() in vistos:
-            return f"Internal lot code '{codigo}' is used by boxes {vistos[codigo.lower()]:02d} and {it['caixa']:02d}."
+            return t("Internal lot code '{codigo}' is used by boxes {a:02d} and {b:02d}.", codigo=codigo, a=vistos[codigo.lower()],
+                     b=it["caixa"])
         vistos[codigo.lower()] = it["caixa"]
     return None
 
@@ -258,14 +260,14 @@ def validar(f):
     """Erros que impedem a gravação (as mesmas regras do programa de mesa)."""
     erros = list(f.get("erros_caixas") or [])
     if not f["lote_geral"]:
-        erros.append("Enter the OPTO batch (general batch ID).")
+        erros.append(t("Enter the OPTO batch (general batch ID)."))
     if inteiro_positivo(f["numero_caixas_menores"]) is None:
-        erros.append("Number of small boxes must be an integer greater than zero.")
+        erros.append(t("Number of small boxes must be an integer greater than zero."))
     if inteiro_positivo(f["capacidade_caixa_menor"]) is None:
-        erros.append("Small box capacity must be an integer greater than zero.")
+        erros.append(t("Small box capacity must be an integer greater than zero."))
     elif not f["total_filtros"]:
-        erros.append("Enter the small box capacity and the number of small boxes "
-                     "(the total number of filters is calculated from them).")
+        erros.append(t("Enter the small box capacity and the number of small boxes "
+                       "(the total number of filters is calculated from them)."))
     conflito = conflito_codigos(f["internos"])
     if conflito:
         erros.append(conflito)
@@ -435,19 +437,19 @@ def limpeza_de_formulario(form):
 def validar_limpeza(f):
     """Retorna (código, erro); erro None se puder gravar."""
     if not f["num"].isdigit():
-        return "", "Type only the number of the cleaning lot (e.g. 0001)."
+        return "", t("Type only the number of the cleaning lot (e.g. 0001).")
     codigo = codigo_do_numero(f["num"], PREFIXO_LIMPEZA)
     if not f["data"] or not f["resp"]:
-        return codigo, "Enter the cleaning date and the responsible."
+        return codigo, t("Enter the cleaning date and the responsible.")
     if inteiro_positivo(f["filtros"]) is None:
-        return codigo, "Number of filters must be an integer greater than zero."
+        return codigo, t("Number of filters must be an integer greater than zero.")
     if not f["resultado"]:
-        return codigo, "Select the result after cleaning."
+        return codigo, t("Select the result after cleaning.")
     con = dados._conectar(dados.DB_LOTES)
     try:
         if con.execute("SELECT id FROM lotes_limpeza WHERE lower(codigo_interno) = lower(?) AND id IS NOT ?",
                        (codigo, f["id"])).fetchone():
-            return codigo, f"The cleaning lot {codigo} already exists."
+            return codigo, t("The cleaning lot {codigo} already exists.", codigo=codigo)
     finally:
         con.close()
     return codigo, None

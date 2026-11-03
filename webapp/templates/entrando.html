@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{ 'pt-BR' if idioma == 'pt' else 'en' }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Starting · Deposition Control · LEPTONS Lab</title>
+  <title>{{ _("Starting") }} · Deposition Control · LEPTONS Lab</title>
   <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='leptons-icon.svg') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
@@ -20,19 +20,20 @@
     </svg>
 
     <div class="entrada-barra"><span id="barra"></span></div>
-    <p class="entrada-ola">Welcome, {{ usuario.nome or usuario.username }}</p>
+    <p class="entrada-ola">{{ _("Welcome, {nome}", nome=usuario.nome or usuario.username) }}</p>
     <ul class="entrada-passos" id="passos" aria-live="polite">
-      <li class="atual">Checking the databases…</li>
+      <li class="atual">{{ _("Checking the databases…") }}</li>
     </ul>
     <div class="entrada-erro" id="erro" hidden>
       <p id="erro-texto"></p>
-      <button class="botao" type="button" id="tentar">Try again</button>
-      <a class="botao primario" href="{{ proxima }}">Continue anyway</a>
+      <button class="botao" type="button" id="tentar">{{ _("Try again") }}</button>
+      <a class="botao primario" href="{{ proxima }}">{{ _("Continue anyway") }}</a>
     </div>
   </main>
 
   <script>
   (function () {
+    const TXT = {{ {"preparar": _("Could not prepare the session: "), "pronto": _("Ready"), "checando": _("Checking the databases…")}|tojson }};
     const raiz = document.getElementById("entrada");
     const lista = document.getElementById("passos");
     const barra = document.getElementById("barra");
@@ -62,7 +63,7 @@
         if (!r.ok) throw new Error(r.erro || resp.status);
       } catch (e) {
         raiz.classList.add("com-erro");
-        document.getElementById("erro-texto").textContent = "Could not prepare the session: " + e.message;
+        document.getElementById("erro-texto").textContent = TXT.preparar + e.message;
         document.getElementById("erro").hidden = false;
         return;
       }
@@ -70,7 +71,7 @@
       const intervalo = Math.max(150, resto / Math.max(1, r.passos.length + 1));
       for (const p of r.passos) { await espera(calmo ? 0 : intervalo); passo(p); }
       await espera(calmo ? 0 : intervalo);
-      passo("Ready", "feito pronto");
+      passo(TXT.pronto, "feito pronto");
       barra.style.width = "100%";
       await espera(calmo ? 150 : 450);
       raiz.classList.add("saindo");
@@ -78,7 +79,8 @@
       location.replace(raiz.dataset.proxima);
     }
     document.getElementById("tentar").addEventListener("click", () => {
-      lista.innerHTML = '<li class="atual">Checking the databases…</li>';
+      lista.innerHTML = "";
+      passo(TXT.checando);
       preparar();
     });
     preparar();

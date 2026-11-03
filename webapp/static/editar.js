@@ -7,7 +7,7 @@
   const $ = (sel, raiz) => (raiz || document).querySelector(sel);
   const $$ = (sel, raiz) => Array.from((raiz || document).querySelectorAll(sel));
   const LIMITE_PERDA_PCT = 5.0, LIMITE_EF = 0.75, MIN_AMOSTRAS_EF = 2, AREA_FILTRO_CM2 = 77.0, N_FILTROS = 28;
-  const TXT = { approved: "Approved", rejected: "Rejected", partial: "In progress", empty: "Not filled" };
+  const TXT = { approved: "Approved", rejected: "Rejected", partial: T("In progress"), empty: T("Not filled") };
 
   function numero(v) {
     const t = String(v == null ? "" : v).trim().replace(",", ".");
@@ -53,7 +53,7 @@
     if (alterado) return;
     alterado = true;
     const el = $("#estado-form");
-    el.textContent = "Unsaved changes";
+    el.textContent = T("Unsaved changes");
     el.className = "nao";
   }
   form.addEventListener("input", marcarAlterado);
@@ -62,13 +62,13 @@
     if (alterado && !enviando) { e.preventDefault(); e.returnValue = ""; }
   });
   $$("[data-sair]").forEach((a) => a.addEventListener("click", (e) => {
-    if (alterado && !confirm("Leave without saving? The changes will be lost.")) e.preventDefault();
+    if (alterado && !confirm(T("Leave without saving? The changes will be lost."))) e.preventDefault();
     else enviando = true;
   }));
   form.addEventListener("submit", (e) => {
     const revisada = form.dataset.revisada;
-    if (revisada && !confirm("This sample was signed off (Final QA) by " + revisada + ".\n\nSaving changes removes the " +
-                             "sign-off: the sample goes back to 'To be reviewed' and needs a new Final QA sign-off. Continue?")) {
+    if (revisada && !confirm(T("This sample was signed off (Final QA) by {por}.\n\nSaving changes removes the sign-off: the sample " +
+                               "goes back to 'To be reviewed' and needs a new Final QA sign-off. Continue?", { por: revisada }))) {
       e.preventDefault();
       return;
     }
@@ -120,8 +120,8 @@
       if (cl in cont) cont[cl]++;
     }
     $("#resumo-visual-texto").textContent = algum
-      ? completos + "/" + N_FILTROS + " filters complete  ·  A: " + cont.A + "   B: " + cont.B + "   C: " + cont.C
-      : "Not filled";
+      ? T("{n}/{total} filters complete", { n: completos, total: N_FILTROS }) + "  ·  A: " + cont.A + "   B: " + cont.B + "   C: " + cont.C
+      : T("Not filled");
     pill($("#resumo-visual"), completos === N_FILTROS ? "approved" : algum ? "partial" : "empty", completos + "/" + N_FILTROS);
   }
   function limparLinha(tr) {
@@ -133,7 +133,7 @@
     recalcular();
   }));
   $("#limpar-tabela").addEventListener("click", () => {
-    if (!confirm("Clear all 28 rows of the inspection table?")) return;
+    if (!confirm(T("Clear all {n} rows of the inspection table?", { n: N_FILTROS }))) return;
     $$("tr[data-filtro]").forEach(limparLinha);
     marcarAlterado();
     recalcular();
@@ -163,10 +163,11 @@
     const preenchidos = valores.filter(Boolean).length;
     algum = algum || preenchidos > 0;
     const estado = valores.includes("No") ? "rejected" : valores.every((v) => v === "Yes") ? "approved" : algum ? "partial" : "empty";
-    const rev = valor("im_revisado") ? "reviewed" : "pending supervisor review";
+    const rev = valor("im_revisado") ? T("reviewed") : T("pending supervisor review");
     const textos = {
-      approved: "Overall result: APPROVED (" + rev + ")", rejected: "Overall result: REJECTED (" + rev + ")",
-      partial: "Overall result: in progress (" + preenchidos + "/" + valores.length + " filled)", empty: "Overall result: not evaluated",
+      approved: T("Overall result: APPROVED ({rev})", { rev }), rejected: T("Overall result: REJECTED ({rev})", { rev }),
+      partial: T("Overall result: in progress ({n}/{total} filled)", { n: preenchidos, total: valores.length }),
+      empty: T("Overall result: not evaluated"),
     };
     const res = $("#resultado-crio");
     res.textContent = textos[estado];
@@ -196,7 +197,7 @@
       $("[data-dif]", tr).textContent = dif == null ? "–" : dif.toFixed(5);
       $("[data-dens]", tr).textContent = dens == null ? "–" : dens.toFixed(2);
       const c = $("[data-cond]", tr);
-      if (testada === "No") { c.textContent = "Not tested"; c.className = "calc suave"; }
+      if (testada === "No") { c.textContent = T("Not tested"); c.className = "calc suave"; }
       else if (x == null) { c.textContent = "–"; c.className = "calc"; }
       else {
         const ok = Math.round(x * 1e6) / 1e6 >= LIMITE_EF;
@@ -211,10 +212,11 @@
     });
     const necessarias = Math.max(MIN_AMOSTRAS_EF, testadas);
     const estado = reprovado ? "rejected" : medidas >= MIN_AMOSTRAS_EF && medidas === testadas ? "approved" : algum ? "partial" : "empty";
-    const rev = valor("ef_revisado") ? "reviewed" : "pending supervisor review";
+    const rev = valor("ef_revisado") ? T("reviewed") : T("pending supervisor review");
     const textos = {
-      approved: "Overall result: APPROVED (" + rev + ")", rejected: "Overall result: REJECTED (" + rev + ")",
-      partial: "Overall result: in progress (" + medidas + "/" + necessarias + " samples measured)", empty: "Overall result: not evaluated",
+      approved: T("Overall result: APPROVED ({rev})", { rev }), rejected: T("Overall result: REJECTED ({rev})", { rev }),
+      partial: T("Overall result: in progress ({n}/{total} samples measured)", { n: medidas, total: necessarias }),
+      empty: T("Overall result: not evaluated"),
     };
     const res = $("#resultado-ef");
     res.textContent = textos[estado];
@@ -235,9 +237,9 @@
     const teste = lerData(valor("ef_data_teste")) || new Date();
     const dias = Math.floor((teste - inst) / 86400000);
     const limite = +aviso.dataset.limite;
-    if (dias < 0) { aviso.textContent = "⚠ installation date is after the test date"; aviso.className = "aviso-referencia nao"; }
-    else if (dias > limite) { aviso.textContent = "⚠ reference in use for " + dias + " days (limit: 6 months)"; aviso.className = "aviso-referencia nao"; }
-    else { aviso.textContent = "Reference in use for " + dias + " days (limit: 6 months)"; aviso.className = "aviso-referencia sim"; }
+    if (dias < 0) { aviso.textContent = "⚠ " + T("installation date is after the test date"); aviso.className = "aviso-referencia nao"; }
+    else if (dias > limite) { aviso.textContent = "⚠ " + T("reference in use for {n} days (limit: 6 months)", { n: dias }); aviso.className = "aviso-referencia nao"; }
+    else { aviso.textContent = T("Reference in use for {n} days (limit: 6 months)", { n: dias }); aviso.className = "aviso-referencia sim"; }
   }
 
   function recalcular() {
@@ -251,7 +253,7 @@
 
   // ---------------- anexos ----------------
   $$("[data-remover-anexo]").forEach((b) => b.addEventListener("click", () => {
-    if (!confirm("Remove this file from the sample? (The file itself is not deleted.)")) return;
+    if (!confirm(T("Remove this file from the sample? (The file itself is not deleted.)"))) return;
     b.closest("li").remove();
     marcarAlterado();
   }));
@@ -265,12 +267,12 @@
   function desenharEscolhidos() {
     entradaLotes.value = JSON.stringify(escolhidos);
     const corpo = $("#lotes-sel");
-    corpo.innerHTML = escolhidos.length ? "" : '<tr><td colspan="6" class="vazio-tabela">No batch selected – add at least one.</td></tr>';
+    corpo.innerHTML = escolhidos.length ? "" : '<tr><td colspan="6" class="vazio-tabela">' + T("No batch selected – add at least one.") + "</td></tr>";
     escolhidos.forEach((l, i) => {
       const tr = document.createElement("tr");
       tr.innerHTML = "<td class='mono'>" + esc(l.codigo_lote) + "</td><td class='mono'>" + esc(l.codigo_interno) + "</td><td>" +
         esc(l.chegada) + "</td><td>" + esc(l.empresa) + "</td><td class='num mono'>" + esc(l.filtros) +
-        "</td><td><button type='button' class='x' title='Remove from this deposition'>✕</button></td>";
+        "</td><td><button type='button' class='x' title='" + T("Remove from this deposition") + "'>✕</button></td>";
       $("button", tr).addEventListener("click", () => {
         escolhidos.splice(i, 1);
         marcarAlterado();
@@ -281,12 +283,13 @@
     const filtros = escolhidos.map((l) => l.filtros).filter((x) => x != null);
     const codigos = escolhidos.map((l) => l.codigo_interno).filter(Boolean);
     const txtInterno = codigos.length
-      ? (codigos.length === 1 ? "Internal lot used: " : "Internal lots used: ") + codigos.slice(0, 4).join(", ") +
+      ? (codigos.length === 1 ? T("Internal lot used: ") : T("Internal lots used: ")) + codigos.slice(0, 4).join(", ") +
         (codigos.length > 4 ? " (+" + (codigos.length - 4) + ")" : "")
-      : "No internal lot selected";
+      : T("No internal lot selected");
     $("#info-lotes").textContent = escolhidos.length
-      ? escolhidos.length + " selected   ·   " + txtInterno + "   ·   Total filters: " + (filtros.length ? filtros.reduce((a, b) => a + b, 0) : "–")
-      : "No batch selected";
+      ? T("{n} selected", { n: escolhidos.length }) + "   ·   " + txtInterno + "   ·   " + T("Total filters: ") +
+        (filtros.length ? filtros.reduce((a, b) => a + b, 0) : "–")
+      : T("No batch selected");
     atualizarOrigem();
   }
 
@@ -297,7 +300,7 @@
   let origens = JSON.parse(entradaOrigens.value || "{}");      // {nº do filtro: chave do lote}
   let rascunho = {};
 
-  const rotulo = (l) => l.codigo_interno ? l.codigo_interno + " (" + (l.codigo_lote || "–") + ")" : (l.codigo_lote || "–") + " (whole batch)";
+  const rotulo = (l) => l.codigo_interno ? l.codigo_interno + " (" + (l.codigo_lote || "–") + ")" : (l.codigo_lote || "–") + " (" + T("whole batch") + ")";
   const curto = (l) => l.codigo_interno || l.codigo_lote || "–";
   // na grade os códigos não cabem: cada lote ganha uma letra (a mesma da legenda e da cor)
   const letra = (i) => String.fromCharCode(65 + i);
@@ -332,18 +335,18 @@
     const feitos = Object.keys(origens).length;
     const grupos = porLote(origens);
     info.className = "info-origem " + (feitos === N_FILTROS ? "sim" : "nao");
-    info.textContent = "Filter origin: " + (feitos ? feitos + "/" + N_FILTROS + " assigned   ·   " +
+    info.textContent = T("Filter origin: ") + (feitos ? T("{n}/{total} assigned", { n: feitos, total: N_FILTROS }) + "   ·   " +
       escolhidos.map((l, i) => grupos[i].length ? curto(l) + ": " + faixas(grupos[i]) : "").filter(Boolean).join("   ·   ")
-      : "not assigned yet – click Filter origin…");
+      : T("not assigned yet – click Filter origin…"));
   }
 
   function desenharOrigem() {
     const grupos = porLote(rascunho);
     $("#og-legenda").innerHTML = escolhidos.map((l, i) => {
-      const caixa = l.filtros != null ? " of " + l.filtros + " in the box" : "";
+      const caixa = l.filtros != null ? " " + T("of {n} in the box", { n: l.filtros }) : "";
       const demais = l.filtros != null && grupos[i].length > l.filtros;
       return "<span class='chip-origem cor-" + (i % 6) + "'><b class='letra'>" + letra(i) + "</b> <b>" + esc(rotulo(l)) + "</b> · " +
-        grupos[i].length + " filter(s)" + caixa + (demais ? " <span class='nao'>– more than the box had</span>" : "") + "</span>";
+        T("{n} filter(s)", { n: grupos[i].length }) + caixa + (demais ? " <span class='nao'>– " + T("more than the box had") + "</span>" : "") + "</span>";
     }).join("");
     const opcoes = "<option value=''>–</option>" + escolhidos.map((l, i) => "<option value='" + i + "'>" + esc(minimo(l)) + "</option>").join("");
     const sel = $("#og-lote"), antes = sel.value;
@@ -366,7 +369,7 @@
       grade.appendChild(cel);
     }
     const feitos = Object.keys(rascunho).length;
-    $("#og-estado").textContent = feitos + "/" + N_FILTROS + " filters assigned";
+    $("#og-estado").textContent = T("{n}/{total} filters assigned", { n: feitos, total: N_FILTROS });
     $("#og-estado").className = feitos === N_FILTROS ? "sim" : "nao";
   }
 
@@ -379,7 +382,7 @@
   });
   $("#og-aplicar").addEventListener("click", () => {
     let de = parseInt($("#og-de").value, 10), ate = parseInt($("#og-ate").value, 10);
-    if (!(de >= 1 && ate >= 1)) { alert("Enter the first and the last filter (1 to " + N_FILTROS + ")."); return; }
+    if (!(de >= 1 && ate >= 1)) { alert(T("Enter the first and the last filter (1 to {n}).", { n: N_FILTROS })); return; }
     if (de > ate) [de, ate] = [ate, de];
     const l = escolhidos[+$("#og-lote").value];
     for (let n = Math.max(1, de); n <= Math.min(N_FILTROS, ate); n++) rascunho[n] = chave(l);
@@ -405,12 +408,12 @@
   let catalogo = null, loteAtual = null;
 
   function status(usado, jaEscolhido, tipo) {
-    if (jaEscolhido) return "<span class='sim'>Selected in this deposition</span>";
-    return usado.length ? "<span class='nao'>Used in PID " + esc(usado.join(", ")) + "</span>" : "Available";
+    if (jaEscolhido) return "<span class='sim'>" + T("Selected in this deposition") + "</span>";
+    return usado.length ? "<span class='nao'>" + T("Used in PID {pid}", { pid: esc(usado.join(", ")) }) + "</span>" : T("Available");
   }
   function desenharLotes() {
     const corpo = $("#sl-lotes");
-    corpo.innerHTML = catalogo.opto.length ? "" : '<tr><td colspan="7" class="vazio-tabela">No OPTO batches registered in lotes.db.</td></tr>';
+    corpo.innerHTML = catalogo.opto.length ? "" : '<tr><td colspan="7" class="vazio-tabela">' + T("No OPTO batches registered in lotes.db.") + "</td></tr>";
     catalogo.opto.forEach((l, i) => {
       const tr = document.createElement("tr");
       tr.className = loteAtual === i ? "selecionada" : "";
@@ -425,8 +428,8 @@
     const lote = catalogo.opto[loteAtual];
     const usados = new Set(escolhidos.map(chave));
     if (!lote.internos.length) {
-      ci.innerHTML = '<tr><td colspan="6" class="vazio-tabela nao">No internal lots are registered for this batch. Register them in ' +
-        "the Batches tab (Edit batch), or click Add selected to add the batch without an internal lot.</td></tr>";
+      ci.innerHTML = '<tr><td colspan="6" class="vazio-tabela nao">' + T("No internal lots are registered for this batch. Register them in " +
+        "the Batches tab (Edit batch), or click Add selected to add the batch without an internal lot.") + "</td></tr>";
       return;
     }
     ci.innerHTML = "";
@@ -443,8 +446,8 @@
   function desenharLimpezas() {
     const corpo = $("#sl-limpezas");
     const usados = new Set(escolhidos.map(chave));
-    corpo.innerHTML = catalogo.limpeza.length ? "" : '<tr><td colspan="9" class="vazio-tabela nao">No Leptons cleaning lots are ' +
-      "registered. Register them in the Batches tab (Leptons cleaning lots).</td></tr>";
+    corpo.innerHTML = catalogo.limpeza.length ? "" : '<tr><td colspan="9" class="vazio-tabela nao">' + T("No Leptons cleaning lots are " +
+      "registered. Register them in the Batches tab (Leptons cleaning lots).") + "</td></tr>";
     catalogo.limpeza.forEach((l, j) => {
       const ja = usados.has(chave(l.entrada));
       const tr = document.createElement("tr");
@@ -461,27 +464,27 @@
     aviso.textContent = "";
     const novos = [];
     if (naOpto) {
-      if (loteAtual == null) { aviso.textContent = "Select a batch first."; return; }
+      if (loteAtual == null) { aviso.textContent = T("Select a batch first."); return; }
       const lote = catalogo.opto[loteAtual];
       if (!lote.internos.length) novos.push(lote.entrada);
       else {
         const marcados = $$("#sl-internos input:checked").map((i) => lote.internos[+i.dataset.j]);
-        if (!marcados.length) { aviso.textContent = "Select at least one internal lot."; return; }
+        if (!marcados.length) { aviso.textContent = T("Select at least one internal lot."); return; }
         marcados.forEach((it) => {
-          if (it.usado.length && !confirm("Internal lot " + it.codigo + " was already used (PID " + it.usado.join(", ") +
-                                          ").\n\nUse it again in this deposition?")) return;
+          if (it.usado.length && !confirm(T("Internal lot {codigo} was already used (PID {pid}).\n\nUse it again in this deposition?",
+                                            { codigo: it.codigo, pid: it.usado.join(", ") }))) return;
           novos.push(it.entrada);
         });
       }
     } else {
       const marcados = $$("#sl-limpezas input:checked").map((i) => catalogo.limpeza[+i.dataset.j]);
-      if (!marcados.length) { aviso.textContent = "Select at least one cleaning lot."; return; }
+      if (!marcados.length) { aviso.textContent = T("Select at least one cleaning lot."); return; }
       marcados.forEach((l) => {
         const res = (l.resultado || "").trim();
         if (res && res.toLowerCase() !== "approved" &&
-            !confirm("Cleaning lot " + l.codigo + " has result '" + res + "'.\n\nUse it in this deposition anyway?")) return;
-        if (l.usado.length && !confirm("Cleaning lot " + l.codigo + " was already used (PID " + l.usado.join(", ") +
-                                       ").\n\nUse it again in this deposition?")) return;
+            !confirm(T("Cleaning lot {codigo} has result '{res}'.\n\nUse it in this deposition anyway?", { codigo: l.codigo, res }))) return;
+        if (l.usado.length && !confirm(T("Cleaning lot {codigo} was already used (PID {pid}).\n\nUse it again in this deposition?",
+                                         { codigo: l.codigo, pid: l.usado.join(", ") }))) return;
         novos.push(l.entrada);
       });
     }
@@ -498,12 +501,12 @@
     $$(".sl-aba").forEach((s) => (s.hidden = "#" + s.id !== a.getAttribute("href")));
   }));
   $("#abrir-seletor").addEventListener("click", async () => {
-    $("#sl-aviso").textContent = "Loading batches…";
+    $("#sl-aviso").textContent = T("Loading batches…");
     dlg.showModal();
     try {
       catalogo = await (await fetch(form.dataset.apiLotes)).json();
     } catch (err) {
-      $("#sl-aviso").textContent = "Could not read the batch database: " + err;
+      $("#sl-aviso").textContent = T("Could not read the batch database: ") + err;
       return;
     }
     $("#sl-aviso").textContent = "";

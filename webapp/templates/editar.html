@@ -1,27 +1,27 @@
 {% extends "base.html" %}
-{% block titulo %}{{ ('Edit run ' ~ (numero or '–')) if f.id else 'New sample' }}{% endblock %}
-{% macro opcoes(nome, valores, atual, classe='') %}<span class="seg {{ classe }}">{% for v in valores %}<label><input type="radio" name="{{ nome }}" value="{{ v }}"{{ ' checked' if atual == v }}><span class="op-{{ v|lower }}">{{ v }}</span></label>{% endfor %}</span>{% endmacro %}
-{% macro data(nome, valor, id=none) %}<span class="com-hoje"><input name="{{ nome }}" value="{{ valor }}" placeholder="YYYY-MM-DD" class="data"{% if id %} id="{{ id }}"{% endif %}><button type="button" class="botao mini-botao" data-hoje>Today</button></span>{% endmacro %}
+{% block titulo %}{{ _('Edit run {n}', n=numero or '–') if f.id else _('New sample') }}{% endblock %}
+{% macro opcoes(nome, valores, atual, classe='') %}<span class="seg {{ classe }}">{% for v in valores %}<label><input type="radio" name="{{ nome }}" value="{{ v }}"{{ ' checked' if atual == v }}><span class="op-{{ v|lower }}">{{ v|tr }}</span></label>{% endfor %}</span>{% endmacro %}
+{% macro data(nome, valor, id=none) %}<span class="com-hoje"><input name="{{ nome }}" value="{{ valor }}" placeholder="YYYY-MM-DD" class="data"{% if id %} id="{{ id }}"{% endif %}><button type="button" class="botao mini-botao" data-hoje>{{ _("Today") }}</button></span>{% endmacro %}
 {% macro revisao(prefixo, r) %}
 <fieldset class="bloco">
   <legend>Technical Supervisor review</legend>
   <div class="linha-campos">
-    <label>Name<input name="{{ prefixo }}supervisor" value="{{ r.supervisor }}"></label>
-    <label>Date{{ data(prefixo ~ 'data_revisao', r.data_revisao) }}</label>
-    <label class="marcar"><input type="checkbox" name="{{ prefixo }}revisado" value="Yes"{{ ' checked' if r.revisado == 'Yes' }}> Reviewed and signed</label>
+    <label>{{ _("Name") }}<input name="{{ prefixo }}supervisor" value="{{ r.supervisor }}"></label>
+    <label>{{ _("Date") }}{{ data(prefixo ~ 'data_revisao', r.data_revisao) }}</label>
+    <label class="marcar"><input type="checkbox" name="{{ prefixo }}revisado" value="Yes"{{ ' checked' if r.revisado == 'Yes' }}> {{ _('Reviewed and signed') }}</label>
   </div>
-  <p class="nota">The decision is final only after the Technical Supervisor signs the record.</p>
+  <p class="nota">{{ _("The decision is final only after the Technical Supervisor signs the record.") }}</p>
 </fieldset>
 {% endmacro %}
 {% block conteudo %}
 <div class="trilha">
-  <a href="{{ url_for('lista') }}">All samples</a>
+  <a href="{{ url_for('lista') }}">{{ _("All samples") }}</a>
   {% if f.id %}<span class="sep">›</span><a href="{{ url_for('tarefa', tarefa_id=f.id) }}">Run {{ numero or '–' }}</a>{% endif %}
-  <span class="sep">›</span><b>{{ 'Edit' if f.id else 'New sample' }}</b>
+  <span class="sep">›</span><b>{{ _('Edit') if f.id else _('New sample') }}</b>
 </div>
 
 <form id="form-tarefa" method="post" action="{{ url_for('gravar_tarefa') }}" enctype="multipart/form-data" autocomplete="off"
-      data-revisada="{{ (revisada[0] ~ ' on ' ~ (revisada[1] or '-')) if revisada else '' }}"
+      data-revisada="{{ _('{por} on {data}', por=revisada[0], data=revisada[1] or '-') if revisada else '' }}"
       data-api-lotes="{{ url_for('api_lotes', sample=f.id) if f.id else url_for('api_lotes') }}">
   <input type="hidden" name="tarefa_id" value="{{ f.id or '' }}">
   <input type="hidden" name="importacao" value="{{ importacao }}">
@@ -32,23 +32,23 @@
 
   <div class="cabecalho">
     <div>
-      <h1>{% if f.id %}Edit run {{ numero or '–' }}{% else %}New sample{% endif %}</h1>
-      <div class="sub">{% if f.id %}<span class="mono">{{ f.pid or 'no PID yet' }}</span> · {% endif %}everything is saved together with <b>Save</b></div>
+      <h1>{% if f.id %}{{ _("Edit run {n}", n=numero or '–') }}{% else %}{{ _("New sample") }}{% endif %}</h1>
+      <div class="sub">{% if f.id %}<span class="mono">{{ f.pid or _('no PID yet') }}</span> · {% endif %}{{ _("everything is saved together with <b>Save</b>") }}</div>
     </div>
     <div class="acoes">
-      <a class="botao" href="{{ url_for('tarefa', tarefa_id=f.id) if f.id else url_for('lista') }}" data-sair>Cancel</a>
-      <button class="botao primario" type="submit">Save</button>
+      <a class="botao" href="{{ url_for('tarefa', tarefa_id=f.id) if f.id else url_for('lista') }}" data-sair>{{ _("Cancel") }}</a>
+      <button class="botao primario" type="submit">{{ _("Save") }}</button>
     </div>
   </div>
 
   {% for e in erros %}<div class="aviso-flash erro">{{ e }}</div>{% endfor %}
   {% for a in avisos %}<div class="aviso-flash aviso">{{ a }}</div>{% endfor %}
   {% if confirmar_run %}
-  <div class="aviso-flash aviso"><button class="botao" type="submit" name="confirmar_run" value="1">Save anyway</button></div>
+  <div class="aviso-flash aviso"><button class="botao" type="submit" name="confirmar_run" value="1">{{ _("Save anyway") }}</button></div>
   {% endif %}
   {% if revisada %}
-  <div class="aviso-flash aviso">🔒 This sample was signed off (Final QA) by <b>{{ revisada[0] }}</b> on {{ revisada[1] or '-' }}.
-    Saving changes removes the sign-off: the sample goes back to “To be reviewed” and needs a new Final QA sign-off.</div>
+  <div class="aviso-flash aviso">🔒 {{ _("This sample was signed off (Final QA) by <b>{por}</b> on {data}.", por=revisada[0], data=revisada[1] or '-') }}
+    {{ _("Saving changes removes the sign-off: the sample goes back to “To be reviewed” and needs a new Final QA sign-off.") }}</div>
   {% endif %}
 
   <nav class="abas" role="tablist">
@@ -61,43 +61,43 @@
   {# ======================= DEPOSIÇÃO ======================= #}
   <section class="aba" id="deposicao">
     <div class="cartao">
-      <h2>Deposition data</h2>
+      <h2>{{ _("Deposition data") }}</h2>
       <div class="campo-largo">
-        <div class="rotulo-campo">Batches</div>
+        <div class="rotulo-campo">{{ _("Batches") }}</div>
         <div>
           <table class="tabela-lotes">
-            <thead><tr><th>OPTO batch</th><th>Internal lot</th><th>Arrival / cleaned</th><th>Company</th><th class="num">Filters</th><th></th></tr></thead>
+            <thead><tr><th>OPTO batch</th><th>Internal lot</th><th>{{ _("Arrival / cleaned") }}</th><th>{{ _("Company") }}</th><th class="num">{{ _("Filters") }}</th><th></th></tr></thead>
             <tbody id="lotes-sel"></tbody>
           </table>
-          <div class="info-lotes" id="info-lotes">No batch selected</div>
+          <div class="info-lotes" id="info-lotes">{{ _("No batch selected") }}</div>
           <div class="info-origem" id="info-origem" hidden></div>
           <div class="linha-botoes">
-            <button type="button" class="botao" id="abrir-seletor">Add batch / internal lot…</button>
+            <button type="button" class="botao" id="abrir-seletor">{{ _("Add batch / internal lot…") }}</button>
             <button type="button" class="botao" id="abrir-origem" hidden
-                    title="The filters of this deposition came from more than one box or batch: assign where each filter came from">Filter origin…</button>
-            <a class="botao" href="{{ url_for('lote_novo') }}" target="_blank" title="Opens the Batches tab in a new browser tab. After registering the batch, use “Add batch / internal lot…” again.">Register a new batch ↗</a>
+                    title="{{ _('The filters of this deposition came from more than one box or batch: assign where each filter came from') }}">{{ _("Filter origin…") }}</button>
+            <a class="botao" href="{{ url_for('lote_novo') }}" target="_blank" title="{{ _('Opens the Batches tab in a new browser tab. After registering the batch, use “Add batch / internal lot…” again.') }}">{{ _("Register a new batch ↗") }}</a>
           </div>
         </div>
       </div>
       <div class="grade-campos">
         <label>Run<input name="run" value="{{ f.run }}" placeholder="DUNE_EVAP_#0001#"></label>
-        <label>Date{{ data('data', f.data) }}</label>
+        <label>{{ _("Date") }}{{ data('data', f.data) }}</label>
         <label>PID<input name="pid" value="{{ f.pid }}" required></label>
-        <label>Position (ex: 1-28)<input name="posicao" value="{{ f.posicao }}"></label>
-        <label>Responsible<input name="responsavel" value="{{ f.responsavel }}"></label>
-        <div class="campo-radio"><span>Filter type</span>
+        <label>{{ _("Position (ex: 1-28)") }}<input name="posicao" value="{{ f.posicao }}"></label>
+        <label>{{ _("Responsible") }}<input name="responsavel" value="{{ f.responsavel }}"></label>
+        <div class="campo-radio"><span>{{ _("Filter type") }}</span>
           {% for tipo in tarefas.TIPOS_FILTRO %}<label class="marcar"><input type="radio" name="tipo" value="{{ tipo }}"{{ ' checked' if f.tipo == tipo }}> {{ tipo }}</label>{% endfor %}</div>
       </div>
       <div class="grade-campos tres">
         {% for a in dados.AMOSTRAS %}<label>PID control {{ a }}<input name="pid_{{ a|lower }}" value="{{ f['pid_' ~ a|lower] }}"></label>{% endfor %}
       </div>
-      <label class="bloco-texto">Observations<textarea name="obs" rows="3">{{ f.obs }}</textarea></label>
+      <label class="bloco-texto">{{ _("Observations") }}<textarea name="obs" rows="3">{{ f.obs }}</textarea></label>
       <div class="anexos">
-        <div class="rotulo-campo">Attached images / files</div>
+        <div class="rotulo-campo">{{ _("Attached images / files") }}</div>
         <ul id="lista-anexos">
           {% for a in f.anexos %}<li><input type="hidden" name="anexo" value="{{ a }}">
             {% if f.id %}<a href="{{ url_for('anexo', tarefa_id=f.id, file=a) }}" target="_blank">{{ a|basename }}</a>{% else %}{{ a|basename }}{% endif %}
-            <button type="button" class="x" title="Remove from the sample" data-remover-anexo>✕</button></li>{% endfor %}
+            <button type="button" class="x" title="{{ _('Remove from the sample') }}" data-remover-anexo>✕</button></li>{% endfor %}
         </ul>
         <input type="file" name="novos_anexos" multiple accept="image/*,.pdf,*/*">
       </div>
@@ -107,7 +107,7 @@
       <h2>Mass control by position</h2>
       <div class="dupla">
         <table class="tabela-massas">
-          <thead><tr><th>Position</th><th>Mass before <span class="unid">(g)</span></th><th>Mass after <span class="unid">(g)</span></th><th>Mass density <span class="unid">(µg/cm²)</span></th></tr></thead>
+          <thead><tr><th>{{ _("Position") }}</th><th>Mass before <span class="unid">(g)</span></th><th>Mass after <span class="unid">(g)</span></th><th>Mass density <span class="unid">(µg/cm²)</span></th></tr></thead>
           <tbody>
           {% for p, nome in dados.POSICOES.items() %}
             <tr data-massa>
@@ -121,11 +121,10 @@
         </table>
         <div>
           <div class="grade-campos">
-            <label>PTP mass (g)<input name="massa_ptp" value="{{ f.massa_ptp }}" class="num" inputmode="decimal"></label>
+            <label>{{ _("PTP mass (g)") }}<input name="massa_ptp" value="{{ f.massa_ptp }}" class="num" inputmode="decimal"></label>
             <label>PTP batch<input name="lote_ptp" value="{{ f.lote_ptp }}"></label>
           </div>
-          <p class="nota">Area: {{ (dados.AREA_FILTRO_CM2 * 100)|round|int }} mm² = {{ dados.AREA_FILTRO_CM2 }} cm² ·
-            density = (after − before) / area</p>
+          <p class="nota">{{ _("Area: {mm} mm² = {cm} cm² · density = (after − before) / area", mm=(dados.AREA_FILTRO_CM2 * 100)|round|int, cm=dados.AREA_FILTRO_CM2) }}</p>
         </div>
       </div>
     </div>
@@ -133,10 +132,10 @@
     <div class="cartao">
       <h2>Final QA sign-off</h2>
       <dl class="chaves">
-        <dt>Signed off by</dt><dd>{{ f.signoff.por or '–' }}</dd>
-        <dt>Date</dt><dd>{{ f.signoff.data or '–' }}</dd>
+        <dt>{{ _("Signed off by") }}</dt><dd>{{ f.signoff.por or '–' }}</dd>
+        <dt>{{ _("Date") }}</dt><dd>{{ f.signoff.data or '–' }}</dd>
       </dl>
-      <p class="nota">Filled by the “Reviewed” button on the Review sample page (Admin only).</p>
+      <p class="nota">{{ _("Filled by the “Reviewed” button on the Review sample page (Admin only).") }}</p>
     </div>
   </section>
 
@@ -145,28 +144,28 @@
     <div class="cartao">
       <h2>DUNE HD – X-ARAPUCA PTP films · Deposition Inspection Record</h2>
       <fieldset class="bloco">
-        <legend>Procedure</legend>
+        <legend>{{ _("Procedure") }}</legend>
         <div class="linha-campos">
-          <label>Inspection date{{ data('insp_data_inspecao', f.insp.data_inspecao) }}</label>
-          <label>Performed by (operator)<input name="insp_operador" value="{{ f.insp.operador }}"></label>
+          <label>{{ _("Inspection date") }}{{ data('insp_data_inspecao', f.insp.data_inspecao) }}</label>
+          <label>{{ _("Performed by (operator)") }}<input name="insp_operador" value="{{ f.insp.operador }}"></label>
         </div>
       </fieldset>
 
       <div class="linha-secao"><span id="resumo-visual-texto"></span>
-        <span class="direita"><button type="button" class="botao" id="limpar-tabela">Clear table</button></span></div>
+        <span class="direita"><button type="button" class="botao" id="limpar-tabela">{{ _("Clear table") }}</button></span></div>
       <div class="rolagem">
         <table class="tabela-inspecao">
-          <thead><tr><th>Filter</th><th>Visual status</th><th>Uniformity</th><th>Stains</th><th>Particles</th>
-            <th>Edge defects</th><th>Finger defects</th><th>Other defects</th><th>Comments</th><th>Class.</th><th></th></tr></thead>
+          <thead><tr><th>{{ _("Filter") }}</th><th>Visual status</th><th>Uniformity</th><th>Stains</th><th>Particles</th>
+            <th>Edge defects</th><th>Finger defects</th><th>Other defects</th><th>{{ _("Comments") }}</th><th>{{ _("Class.") }}</th><th></th></tr></thead>
           <tbody>
           {% for n, v in f.filtros.items() %}
             <tr data-filtro>
               <td class="mono"><b>{{ '%02d'|format(n) }}</b></td>
-              {% for campo, _, ops in tarefas.CAMPOS_FILTRO %}
+              {% for campo, _titulo, ops in tarefas.CAMPOS_FILTRO %}
                 {% if campo == 'comments' %}<td><input name="f{{ n }}_comments" value="{{ v.comments }}" class="comentario"></td>
                 {% else %}<td>{{ opcoes('f' ~ n ~ '_' ~ campo, ops, v[campo], 'classe' if campo == 'classification' else '') }}</td>{% endif %}
               {% endfor %}
-              <td><button type="button" class="x" title="Clear this row" data-limpar-linha>✕</button></td>
+              <td><button type="button" class="x" title="{{ _('Clear this row') }}" data-limpar-linha>✕</button></td>
             </tr>
           {% endfor %}
           </tbody>
@@ -181,7 +180,7 @@
           <tr><td class="classe-C">C</td><td>Minor cosmetic defects with no expected impact on performance.</td><td><b>→ Accept</b></td></tr>
         </table>
       </fieldset>
-      <label class="bloco-texto">Notes<textarea name="insp_notes" rows="2">{{ f.insp.notes }}</textarea></label>
+      <label class="bloco-texto">{{ _("Notes") }}<textarea name="insp_notes" rows="2">{{ f.insp.notes }}</textarea></label>
       {{ revisao('insp_', f.insp) }}
     </div>
   </section>
@@ -191,16 +190,16 @@
     <div class="cartao">
       <h2>Cryogenic immersion · control substrates P02, P03, P14</h2>
       <fieldset class="bloco">
-        <legend>Procedure</legend>
+        <legend>{{ _("Procedure") }}</legend>
         <div class="linha-campos">
-          <label>Test date{{ data('im_data', f.im.data) }}</label>
-          <label>Performed by (operator)<input name="im_operador" value="{{ f.im.operador }}"></label>
+          <label>{{ _("Test date") }}{{ data('im_data', f.im.data) }}</label>
+          <label>{{ _("Performed by (operator)") }}<input name="im_operador" value="{{ f.im.operador }}"></label>
         </div>
       </fieldset>
-      <h3>Mass control of the control substrates</h3>
+      <h3>{{ _("Mass control of the control substrates") }}</h3>
       <table class="tabela-massas">
-        <thead><tr><th>Control position</th><th>Mass before <span class="unid">(g)</span></th><th>Mass after <span class="unid">(g)</span></th><th>Difference (after − before)</th>
-          <th>Condition (loss ≤ {{ '%g'|format(dados.LIMITE_PERDA_PCT) }} %)</th></tr></thead>
+        <thead><tr><th>Control position</th><th>Mass before <span class="unid">(g)</span></th><th>Mass after <span class="unid">(g)</span></th><th>{{ _("Difference (after − before)") }}</th>
+          <th>{{ _('Condition (loss ≤ {n} %)', n='%g'|format(dados.LIMITE_PERDA_PCT)) }}</th></tr></thead>
         <tbody>
         {% for a in dados.AMOSTRAS %}
           <tr data-imersao>
@@ -212,13 +211,11 @@
         {% endfor %}
         </tbody>
       </table>
-      <p class="nota">Mass loss (%) = (mass after − mass before) / mass before × 100. Loss ≤ {{ '%g'|format(dados.LIMITE_PERDA_PCT) }} % → Approved;
-        loss &gt; {{ '%g'|format(dados.LIMITE_PERDA_PCT) }} % → Rejected (non-conforming). The overall result is APPROVED only if all
-        {{ dados.AMOSTRAS|length }} control substrates are approved and all {{ dados.ITENS_IMERSAO|length }} inspection items below are Yes.</p>
+      <p class="nota">{{ _("Mass loss (%) = (mass after − mass before) / mass before × 100. Loss ≤ {lim} % → Approved; loss &gt; {lim} % → Rejected (non-conforming). The overall result is APPROVED only if all {n} control substrates are approved and all {itens} inspection items below are Yes.", lim='%g'|format(dados.LIMITE_PERDA_PCT), n=dados.AMOSTRAS|length, itens=dados.ITENS_IMERSAO|length) }}</p>
 
       <h3>Post-immersion inspection – acceptance criteria</h3>
       <table class="tabela-criterios">
-        <thead><tr><th>Inspection item</th><th>Acceptance criteria</th><th>Rejected condition</th><th>Approved?</th></tr></thead>
+        <thead><tr><th>Inspection item</th><th>Acceptance criteria</th><th>Rejected condition</th><th>{{ _("Approved?") }}</th></tr></thead>
         <tbody>
         {% for chave, item, aceite, rejeitado in dados.ITENS_IMERSAO %}
           <tr><td><b>{{ item }}</b></td><td>{{ aceite }}</td><td>{{ rejeitado }}</td>
@@ -226,7 +223,7 @@
         {% endfor %}
         </tbody>
       </table>
-      <label class="bloco-texto">Observations<textarea name="im_obs" rows="3">{{ f.im.obs }}</textarea></label>
+      <label class="bloco-texto">{{ _("Observations") }}<textarea name="im_obs" rows="3">{{ f.im.obs }}</textarea></label>
       {{ revisao('im_', f.im) }}
       <div class="resultado" id="resultado-crio"></div>
     </div>
@@ -236,25 +233,24 @@
   <section class="aba" id="eficiencia" hidden>
     <div class="cartao">
       <h2>VUV optical conversion efficiency · acceptance x ≥ {{ '%g'|format(dados.LIMITE_EFICIENCIA) }}</h2>
-      <p class="nota"><a href="{{ url_for('sincronizar') }}" data-sair>Sync Leptons Control Sheet</a> compares the Deposition Control and
-        Efficiency Test tabs with every saved sample (matched by run, e.g. DUNE_EVAP_#0002#). Save this sample first.</p>
+      <p class="nota"><a href="{{ url_for('sincronizar') }}" data-sair>Sync Leptons Control Sheet</a> {{ _("compares the Deposition Control and Efficiency Test tabs with every saved sample (matched by run, e.g. DUNE_EVAP_#0002#). Save this sample first.") }}</p>
       <fieldset class="bloco">
-        <legend>Test data</legend>
+        <legend>{{ _("Test data") }}</legend>
         <div class="grade-campos">
-          <label>Test date{{ data('ef_data_teste', f.ef.data_teste, 'ef-data-teste') }}</label>
-          <label>Reference substrate ID<input name="ef_ref_id" value="{{ f.ef.ref_id }}"></label>
-          <label>Installation date<input name="ef_ref_data" value="{{ f.ef.ref_data }}" placeholder="YYYY-MM-DD" id="ef-ref-data"></label>
-          <label>Mean room temperature (°C)<input name="ef_temp" value="{{ f.ef.temp }}" class="num" inputmode="decimal"></label>
-          <label>Mean relative humidity (%)<input name="ef_umid" value="{{ f.ef.umid }}" class="num" inputmode="decimal"></label>
-          <label>Performed by (operator)<input name="ef_operador" value="{{ f.ef.operador }}"></label>
+          <label>{{ _("Test date") }}{{ data('ef_data_teste', f.ef.data_teste, 'ef-data-teste') }}</label>
+          <label>{{ _("Reference substrate ID") }}<input name="ef_ref_id" value="{{ f.ef.ref_id }}"></label>
+          <label>{{ _("Installation date") }}<input name="ef_ref_data" value="{{ f.ef.ref_data }}" placeholder="YYYY-MM-DD" id="ef-ref-data"></label>
+          <label>{{ _("Mean room temperature (°C)") }}<input name="ef_temp" value="{{ f.ef.temp }}" class="num" inputmode="decimal"></label>
+          <label>{{ _("Mean relative humidity (%)") }}<input name="ef_umid" value="{{ f.ef.umid }}" class="num" inputmode="decimal"></label>
+          <label>{{ _("Performed by (operator)") }}<input name="ef_operador" value="{{ f.ef.operador }}"></label>
         </div>
         <div class="aviso-referencia" id="idade-referencia" data-limite="{{ tarefas.IDADE_MAX_REFERENCIA_DIAS }}"></div>
       </fieldset>
 
-      <h3>QC samples – mass and area (same columns as the Leptons Control Sheet)</h3>
+      <h3>{{ _("QC samples – mass and area (same columns as the Leptons Control Sheet)") }}</h3>
       <table class="tabela-massas">
-        <thead><tr><th>Control position</th><th>Tested?</th><th>Mass before <span class="unid">(g)</span></th><th>Mass after <span class="unid">(g)</span></th><th>M.after − M.before <span class="unid">(g)</span></th>
-          <th>Area <span class="unid">(cm²)</span></th><th>Density <span class="unid">(µg/cm²)</span></th><th>Relative efficiency (x)</th><th>Condition</th></tr></thead>
+        <thead><tr><th>Control position</th><th>{{ _("Tested?") }}</th><th>Mass before <span class="unid">(g)</span></th><th>Mass after <span class="unid">(g)</span></th><th>M.after − M.before <span class="unid">(g)</span></th>
+          <th>{{ _("Area") }} <span class="unid">(cm²)</span></th><th>{{ _("Density") }} <span class="unid">(µg/cm²)</span></th><th>Relative efficiency (x)</th><th>{{ _("Condition") }}</th></tr></thead>
         <tbody>
         {% for a in dados.AMOSTRAS %}{% set r = f.ef_amostras[a] %}
           <tr data-eficiencia>
@@ -271,63 +267,59 @@
         {% endfor %}
         </tbody>
       </table>
-      <p class="nota">Tested? = Yes when the control sample was tested in this run; only those are evaluated. x = UV transmission
-        efficiency relative to the reference substrate: x ≥ {{ '%g'|format(dados.LIMITE_EFICIENCIA) }} → Approved, below → Rejected
-        (no upper bound). The batch is approved only if at least {{ dados.MIN_AMOSTRAS_EFICIENCIA }} samples are tested and every
-        tested sample passes. Density (µg/cm²) = (mass after − mass before) × 10⁶ / area (cm²).</p>
-      <label class="bloco-texto">Observations<textarea name="ef_obs" rows="3">{{ f.ef.obs }}</textarea></label>
+      <p class="nota">{{ _("Tested? = Yes when the control sample was tested in this run; only those are evaluated. x = UV transmission efficiency relative to the reference substrate: x ≥ {lim} → Approved, below → Rejected (no upper bound). The batch is approved only if at least {n} samples are tested and every tested sample passes. Density (µg/cm²) = (mass after − mass before) × 10⁶ / area (cm²).", lim='%g'|format(dados.LIMITE_EFICIENCIA), n=dados.MIN_AMOSTRAS_EFICIENCIA) }}</p>
+      <label class="bloco-texto">{{ _("Observations") }}<textarea name="ef_obs" rows="3">{{ f.ef.obs }}</textarea></label>
       {{ revisao('ef_', f.ef) }}
       <div class="resultado" id="resultado-ef"></div>
     </div>
   </section>
 
   <div class="barra-salvar">
-    <span id="estado-form" class="suave">No unsaved changes</span>
-    <a class="botao" href="{{ url_for('tarefa', tarefa_id=f.id) if f.id else url_for('lista') }}" data-sair>Cancel</a>
-    <button class="botao primario" type="submit">Save</button>
+    <span id="estado-form" class="suave">{{ _("No unsaved changes") }}</span>
+    <a class="botao" href="{{ url_for('tarefa', tarefa_id=f.id) if f.id else url_for('lista') }}" data-sair>{{ _("Cancel") }}</a>
+    <button class="botao primario" type="submit">{{ _("Save") }}</button>
   </div>
 </form>
 
 {# ======================= JANELA: ESCOLHER LOTE ======================= #}
 <dialog id="seletor-lotes" class="dialogo">
-  <div class="dialogo-topo"><h2>Select batch and internal lot</h2><button type="button" class="x" data-fechar>✕</button></div>
+  <div class="dialogo-topo"><h2>{{ _("Select batch and internal lot") }}</h2><button type="button" class="x" data-fechar>✕</button></div>
   <nav class="abas pequenas"><a href="#sl-opto" class="ativo">OPTO batch / internal lot</a><a href="#sl-limpeza">Leptons cleaning lot</a></nav>
   <div class="sl-aba" id="sl-opto">
-    <div class="sub-titulo">1) Select the OPTO batch</div>
-    <div class="rolagem lista-dialogo"><table class="selecionavel"><thead><tr><th>OPTO batch</th><th>Arrival</th><th>Company</th>
-      <th>QR / tracking</th><th class="num">Filters</th><th class="num">Small boxes</th><th>Inspection</th></tr></thead><tbody id="sl-lotes"></tbody></table></div>
-    <div class="sub-titulo">2) Select the internal lot(s) used in this deposition (small boxes, e.g. DUNE-CX-0004)</div>
-    <div class="rolagem lista-dialogo"><table><thead><tr><th></th><th>Box</th><th>Internal lot</th><th class="num">Filters</th><th>Notes</th><th>Status</th></tr></thead>
-      <tbody id="sl-internos"><tr><td colspan="6" class="vazio-tabela">Select a batch above.</td></tr></tbody></table></div>
+    <div class="sub-titulo">{{ _("1) Select the OPTO batch") }}</div>
+    <div class="rolagem lista-dialogo"><table class="selecionavel"><thead><tr><th>OPTO batch</th><th>{{ _("Arrival") }}</th><th>{{ _("Company") }}</th>
+      <th>QR / tracking</th><th class="num">{{ _("Filters") }}</th><th class="num">{{ _("Small boxes") }}</th><th>{{ _("Inspection") }}</th></tr></thead><tbody id="sl-lotes"></tbody></table></div>
+    <div class="sub-titulo">{{ _("2) Select the internal lot(s) used in this deposition (small boxes, e.g. DUNE-CX-0004)") }}</div>
+    <div class="rolagem lista-dialogo"><table><thead><tr><th></th><th>{{ _("Box") }}</th><th>Internal lot</th><th class="num">{{ _("Filters") }}</th><th>{{ _("Notes") }}</th><th>Status</th></tr></thead>
+      <tbody id="sl-internos"><tr><td colspan="6" class="vazio-tabela">{{ _("Select a batch above.") }}</td></tr></tbody></table></div>
   </div>
   <div class="sl-aba" id="sl-limpeza" hidden>
-    <div class="sub-titulo">Leptons cleaning lots: material that went through PTP removal and a new cleaning at Leptons Lab</div>
-    <div class="rolagem lista-dialogo alta"><table><thead><tr><th></th><th>Cleaning lot</th><th>Date</th><th>Responsible</th><th class="num">Filters</th>
-      <th>Origin</th><th>PTP removed</th><th>Result</th><th>Status</th></tr></thead><tbody id="sl-limpezas"></tbody></table></div>
+    <div class="sub-titulo">{{ _("Leptons cleaning lots: material that went through PTP removal and a new cleaning at Leptons Lab") }}</div>
+    <div class="rolagem lista-dialogo alta"><table><thead><tr><th></th><th>Cleaning lot</th><th>{{ _("Date") }}</th><th>{{ _("Responsible") }}</th><th class="num">{{ _("Filters") }}</th>
+      <th>{{ _("Origin") }}</th><th>{{ _("PTP removed") }}</th><th>{{ _("Result") }}</th><th>Status</th></tr></thead><tbody id="sl-limpezas"></tbody></table></div>
   </div>
   <div class="dialogo-rodape"><span class="nao" id="sl-aviso"></span>
-    <button type="button" class="botao primario" id="sl-adicionar">Add selected</button>
-    <button type="button" class="botao" data-fechar>Done</button></div>
+    <button type="button" class="botao primario" id="sl-adicionar">{{ _("Add selected") }}</button>
+    <button type="button" class="botao" data-fechar>{{ _("Done") }}</button></div>
 </dialog>
 
 {# ======================= JANELA: ORIGEM DE CADA FILTRO ======================= #}
 <dialog id="dlg-origem" class="dialogo medio">
-  <div class="dialogo-topo"><h2>Filter origin</h2><button type="button" class="x" data-fechar>✕</button></div>
+  <div class="dialogo-topo"><h2>{{ _("Filter origin") }}</h2><button type="button" class="x" data-fechar>✕</button></div>
   <div class="dialogo-corpo">
-    <p class="suave">This deposition used more than one box or batch. Choose where each of the {{ dados.N_FILTROS }} filters came from:
-      type a range below, or pick each filter in the grid.</p>
+    <p class="suave">{{ _("This deposition used more than one box or batch. Choose where each of the {n} filters came from: type a range below, or pick each filter in the grid.", n=dados.N_FILTROS) }}</p>
     <div class="origem-legenda" id="og-legenda"></div>
     <div class="origem-faixa">
-      Filters <input id="og-de" class="num" inputmode="numeric" value="1"> to <input id="og-ate" class="num" inputmode="numeric" value="{{ dados.N_FILTROS }}">
-      come from <select id="og-lote"></select>
-      <button type="button" class="botao" id="og-aplicar">Apply</button>
-      <button type="button" class="botao" id="og-limpar">Clear all</button>
+      {{ _("Filters") }} <input id="og-de" class="num" inputmode="numeric" value="1"> {{ _("to") }} <input id="og-ate" class="num" inputmode="numeric" value="{{ dados.N_FILTROS }}">
+      {{ _("come from") }} <select id="og-lote"></select>
+      <button type="button" class="botao" id="og-aplicar">{{ _("Apply") }}</button>
+      <button type="button" class="botao" id="og-limpar">{{ _("Clear all") }}</button>
     </div>
     <div class="origem-grade" id="og-grade"></div>
   </div>
   <div class="dialogo-rodape"><span id="og-estado" class="suave"></span>
-    <button type="button" class="botao" data-fechar>Cancel</button>
-    <button type="button" class="botao primario" id="og-ok">Done</button></div>
+    <button type="button" class="botao" data-fechar>{{ _("Cancel") }}</button>
+    <button type="button" class="botao primario" id="og-ok">{{ _("Done") }}</button></div>
 </dialog>
 
 <script src="{{ url_for('static', filename='editar.js') }}"></script>

@@ -194,6 +194,13 @@ td.centro, th.centro { text-align: center; }
   white-space: nowrap; text-decoration: none; line-height: 1.15; }
 .topo .quem small { display: block; font-size: 11px; font-weight: 500; color: var(--suave); }
 .topo .quem:hover { color: var(--acento); }
+/* EN | PT ao lado do nome do usuário (e embaixo da caixa de login) */
+.idioma { display: inline-flex; border: 1px solid var(--borda-forte); border-radius: 999px; overflow: hidden; flex: none; }
+.idioma a { padding: 3px 9px; font: 600 11px var(--sans); letter-spacing: .04em; color: var(--suave); text-decoration: none; }
+.idioma a + a { border-left: 1px solid var(--borda-forte); }
+.idioma a:hover { color: var(--acento); }
+.idioma a.ativo { background: var(--lima); color: #1d1f00; }
+.idioma-login { display: flex; justify-content: center; margin-top: 10px; }
 .tela-login { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
 .caixa-login {
   width: 100%; max-width: 380px; background: var(--cartao); border: 1px solid var(--borda); border-radius: 12px;

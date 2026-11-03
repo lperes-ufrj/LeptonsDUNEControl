@@ -10,6 +10,7 @@ import sqlite3
 from datetime import datetime
 
 from . import banco, dados, lotes
+from .i18n import t
 
 AMOSTRAS = dados.AMOSTRAS
 POSICOES = dados.POSICOES
@@ -208,15 +209,15 @@ def validar(f):
     """Erros que impedem gravar (os mesmos do programa de mesa)."""
     erros = []
     if not f["lotes"]:
-        erros.append("Select at least one batch.")
+        erros.append(t("Select at least one batch."))
     if not f["pid"]:
-        erros.append("Enter the PID.")
+        erros.append(t("Enter the PID."))
     for p, nome in POSICOES.items():
         m = f["massas"][p]
         if not m["antes"] or not m["depois"]:
-            erros.append(f"Mass control: masses missing at position {p} – {nome}.")
+            erros.append(t("Mass control: masses missing at position {p} – {nome}.", p=p, nome=nome))
         elif dados.numero(m["antes"]) is None or dados.numero(m["depois"]) is None:
-            erros.append(f"Mass control: check the masses at position {p} – use numbers only.")
+            erros.append(t("Mass control: check the masses at position {p} – use numbers only.", p=p))
     return erros
 
 

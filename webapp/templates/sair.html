@@ -1,15 +1,15 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{ 'pt-BR' if idioma == 'pt' else 'en' }}">
 <head>
   <meta charset="utf-8">
-  <title>Closed · Deposition Control · LEPTONS Lab</title>
+  <title>{{ _("Closed") }} · Deposition Control · LEPTONS Lab</title>
   <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='leptons-icon.svg') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
   <main class="conteudo" style="margin: 80px auto; max-width: 560px; text-align: center">
-    <h1 style="justify-content: center">Deposition Control closed</h1>
-    <p class="suave">You can close this tab. Run <span class="mono">python leptons_web.py</span> to open it again.</p>
+    <h1 style="justify-content: center">{{ _("Deposition Control closed") }}</h1>
+    <p class="suave">{{ _('You can close this tab. Run <span class="mono">python leptons_web.py</span> to open it again.') }}</p>
   </main>
 </body>
 </html>

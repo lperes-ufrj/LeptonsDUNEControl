@@ -2,19 +2,19 @@
 {% block titulo %}Audit log{% endblock %}
 {% block conteudo %}
 <div class="cabecalho"><div><h1>Audit log</h1>
-  <div class="sub">Who did what, in the desktop programs and in this app · latest 2000 matching entries</div></div>
+  <div class="sub">{{ _("Who did what, in the desktop programs and in this app · latest 2000 matching entries") }}</div></div>
   <div class="acoes">
-    <form class="linha-form"><input name="q" value="{{ busca }}" placeholder="Search user, action, details, date…"><button class="botao">Search</button></form>
+    <form class="linha-form"><input name="q" value="{{ busca }}" placeholder="{{ _('Search user, action, details, date…') }}"><button class="botao">{{ _("Search") }}</button></form>
     <a class="botao" href="{{ url_for('auditoria_csv', q=busca or None) }}">Export CSV</a>
   </div></div>
 <div class="cartao rolagem" style="padding: 6px 8px">
   <table>
-    <thead><tr><th>When</th><th>User</th><th>Program</th><th>Action</th><th>Details</th></tr></thead>
+    <thead><tr><th>{{ _("When") }}</th><th>{{ _("User") }}</th><th>{{ _("Program") }}</th><th>{{ _("Action") }}</th><th>{{ _("Details") }}</th></tr></thead>
     <tbody>
     {% for quando, user, prog, acao, det in linhas %}
       <tr><td class="mono pequeno">{{ quando }}</td><td class="mono">{{ user or '–' }}</td><td class="pequeno">{{ prog or '–' }}</td>
         <td class="mono"><b>{{ acao }}</b></td><td class="pequeno">{{ det or '' }}</td></tr>
-    {% else %}<tr><td colspan="5" class="vazio-tabela">No entries.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="5" class="vazio-tabela">{{ _("No entries.") }}</td></tr>{% endfor %}
     </tbody>
   </table>
 </div>

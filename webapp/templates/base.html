@@ -1,11 +1,17 @@
+{% from "_idioma.html" import troca_idioma with context %}
 <!doctype html>
-<html lang="en">
+<html lang="{{ 'pt-BR' if idioma == 'pt' else 'en' }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block titulo %}Deposition Control{% endblock %} · LEPTONS Lab</title>
   <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='leptons-icon.svg') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script>
+    // textos das telas em português (vazio em inglês); T("texto {n}", {n: 3}) troca os {nomes}
+    window.TXT_PT = {{ textos_js|tojson }};
+    window.T = (s, kw) => Object.entries(kw || {}).reduce((r, [k, v]) => r.split("{" + k + "}").join(v), TXT_PT[s] || s);
+  </script>
 </head>
 <body>
   {% set em_lotes = (request.endpoint or '').startswith('lote') %}
@@ -15,25 +21,26 @@
       <span class="produto">Deposition Control<small>Unicamp · DUNE</small></span>
     </a>
     <nav class="nav">
-      <a href="{{ url_for('lista') }}" class="{{ 'ativo' if not em_lotes and request.endpoint not in ('usuarios', 'auditoria', 'trocar_senha') }}">Samples</a>
-      <a href="{{ url_for('lotes_lista') }}" class="{{ 'ativo' if em_lotes }}">Batches</a>
+      <a href="{{ url_for('lista') }}" class="{{ 'ativo' if not em_lotes and request.endpoint not in ('usuarios', 'auditoria', 'trocar_senha') }}">{{ _("Samples") }}</a>
+      <a href="{{ url_for('lotes_lista') }}" class="{{ 'ativo' if em_lotes }}">{{ _("Batches") }}</a>
       {% if eh_admin %}
-      <a href="{{ url_for('usuarios') }}" class="{{ 'ativo' if request.endpoint == 'usuarios' }}">Users</a>
-      <a href="{{ url_for('auditoria') }}" class="{{ 'ativo' if request.endpoint == 'auditoria' }}">Audit log</a>
+      <a href="{{ url_for('usuarios') }}" class="{{ 'ativo' if request.endpoint == 'usuarios' }}">{{ _("Users") }}</a>
+      <a href="{{ url_for('auditoria') }}" class="{{ 'ativo' if request.endpoint == 'auditoria' }}">{{ _("Audit log") }}</a>
       {% endif %}
     </nav>
     <div class="direita">
       <form class="busca-topo" action="{{ url_for('lotes_lista' if em_lotes else 'lista') }}">
         <input name="q" value="{{ q or '' }}" autocomplete="off"
-               placeholder="{{ 'Search batch, tracking ID, internal lot…' if em_lotes else 'Search run, PID, batch, responsible…' }}">
+               placeholder="{{ _('Search batch, tracking ID, internal lot…') if em_lotes else _('Search run, PID, batch, responsible…') }}">
       </form>
-      <a class="quem" href="{{ url_for('trocar_senha') }}" title="{{ usuario.username }} · {{ usuario.perfil }} – change my password">{{ usuario.nome or usuario.username }}<small>{{ usuario.perfil }}</small></a>
+      <a class="quem" href="{{ url_for('trocar_senha') }}" title="{{ usuario.username }} · {{ usuario.perfil }} – {{ _('change my password') }}">{{ usuario.nome or usuario.username }}<small>{{ usuario.perfil }}</small></a>
+      {{ troca_idioma() }}
       <form action="{{ url_for('logout') }}" method="post">
-        <button class="botao sair">Log out</button>
+        <button class="botao sair">{{ _("Log out") }}</button>
       </form>
       <form action="{{ url_for('sair') }}" method="post"
-            onsubmit="return confirm('Close the Deposition Control browser app?')">
-        <button class="botao sair" title="Stop the program (closing the tab keeps it running)">Quit</button>
+            onsubmit='return confirm({{ _("Close the Deposition Control browser app?")|tojson }})'>
+        <button class="botao sair" title="{{ _('Stop the program (closing the tab keeps it running)') }}">{{ _("Quit") }}</button>
       </form>
     </div>
   </header>
@@ -41,10 +48,10 @@
   <div class="corpo {{ 'sem-lateral' if arvore is not defined and lat_lotes is not defined }}">
     {% if lat_lotes is defined %}
     <aside class="lateral">
-      <div class="titulo-lateral">Inspection result</div>
+      <div class="titulo-lateral">{{ _("Inspection result") }}</div>
       <ul class="arvore">
         <li><a href="{{ url_for('lotes_lista') }}" class="{{ 'ativo' if request.endpoint == 'lotes_lista' and not res and not q }}">
-          <span class="rotulo">All batches</span><span class="n">{{ lat_lotes|length }}</span></a></li>
+          <span class="rotulo">{{ _("All batches") }}</span><span class="n">{{ lat_lotes|length }}</span></a></li>
         {% for r in chegada_resultados %}
         <li><a href="{{ url_for('lotes_lista', result=r) }}" class="{{ 'ativo' if res == r }}">
           <span class="rotulo">{{ r }}</span><span class="n">{{ contagem_res[r] }}</span></a></li>
@@ -58,7 +65,7 @@
           <span class="rotulo">{{ l.lote_geral or l.tracking_id or 'ID ' ~ l.id }}</span>
           <span class="n">{{ l.n_internos }}/{{ l.numero_caixas_menores or 0 }}</span></a></li>
         {% else %}
-        <li class="suave pequeno" style="padding: 5px 8px">No batch registered yet</li>
+        <li class="suave pequeno" style="padding: 5px 8px">{{ _("No batch registered yet") }}</li>
         {% endfor %}
       </ul>
 
@@ -73,20 +80,20 @@
       <div class="titulo-lateral">Status</div>
       <ul class="arvore">
         <li><a href="{{ url_for('lista') }}" class="{{ 'ativo' if request.endpoint == 'lista' and not st and lote is none and not interno }}">
-          <span class="rotulo">All samples</span><span class="n">{{ total }}</span></a></li>
+          <span class="rotulo">{{ _("All samples") }}</span><span class="n">{{ total }}</span></a></li>
         {% for s in STATUS_TODOS %}
         <li><a href="{{ url_for('lista', status=s) }}" class="{{ 'ativo' if st == s }}">
           <span class="rotulo">{{ s }}</span><span class="n">{{ contagem[s] }}</span></a></li>
         {% endfor %}
       </ul>
 
-      <div class="titulo-lateral">Batches</div>
+      <div class="titulo-lateral">{{ _("Batches") }}</div>
       <ul class="arvore">
         {% for opto, g in arvore %}
         <li>
           <a href="{{ url_for('lista', lote=opto) }}" class="{{ 'ativo' if lote == opto and not interno }} {{ 'vazio' if not opto }}"
-             title="{{ opto or 'Samples without a batch' }}">
-            <span class="rotulo"><span class="seta">{{ '▾' if g.internos else '▸' }}</span>{{ opto or 'No batch yet' }}</span>
+             title="{{ opto or _('Samples without a batch') }}">
+            <span class="rotulo"><span class="seta">{{ '▾' if g.internos else '▸' }}</span>{{ opto or _('No batch yet') }}</span>
             <span class="n">{{ g.total }}</span></a>
           {% if g.internos %}
           <ul>
@@ -111,16 +118,16 @@
       {# janela de exclusão: só um Admin exclui, confirmando com a própria senha #}
       <dialog id="dlg-excluir" class="dialogo pequeno">
         <form method="post" id="form-excluir">
-          <div class="dialogo-topo"><h2 id="excluir-titulo">Delete</h2><button type="button" class="x" data-fechar-excluir>✕</button></div>
+          <div class="dialogo-topo"><h2 id="excluir-titulo">{{ _("Delete") }}</h2><button type="button" class="x" data-fechar-excluir>✕</button></div>
           <div class="dialogo-corpo form-login">
             <p id="excluir-texto"></p>
-            <p class="nao">This cannot be undone.</p>
-            <label>Confirm with your password ({{ usuario.username }})
+            <p class="nao">{{ _("This cannot be undone.") }}</p>
+            <label>{{ _("Confirm with your password ({user})", user=usuario.username) }}
               <input type="password" name="senha" required autocomplete="current-password"></label>
           </div>
           <div class="dialogo-rodape">
-            <button type="button" class="botao" data-fechar-excluir>Cancel</button>
-            <button class="botao perigo-cheio">Delete</button>
+            <button type="button" class="botao" data-fechar-excluir>{{ _("Cancel") }}</button>
+            <button class="botao perigo-cheio">{{ _("Delete") }}</button>
           </div>
         </form>
       </dialog>
@@ -143,7 +150,7 @@
       <div class="rodape">
         <img src="{{ url_for('logo', nome='esquerda.png', recorte=1) }}" alt="Unicamp">
         <img src="{{ url_for('logo', nome='direita.png', recorte=1) }}" alt="DUNE">
-        <span class="texto-rodape">LEPTONS Laboratory · Unicamp · Deposition Control System for DUNE · read at {{ agora }}</span>
+        <span class="texto-rodape">{{ _("LEPTONS Laboratory · Unicamp · Deposition Control System for DUNE · read at {hora}", hora=agora) }}</span>
       </div>
     </main>
   </div>

@@ -53,5 +53,9 @@ Browser app (branch browser-app)
 - A completed sample (Final QA signed off) can only be changed by an Admin – edit, .json import over it or sheet
   sync (for an Operator the sync skips it). Saving any change removes the sign-off: the sample goes back to
   "To be reviewed" and needs a new Final QA sign-off. Refused attempts are logged as EDIT_DENIED.
+- Language: the EN | PT buttons next to the user name (also under the login box) switch the screens between English and
+  Portuguese; the choice is remembered by the browser. Technical terms (sample, batch, OPTO batch, internal lot, run, PID,
+  Final QA sign-off, PTP, test names, statuses, Approved/Rejected) stay in English, and the reports, PDFs and audit codes
+  are always in English. Translations are in webapp/textos_pt.py (English text → Portuguese).
 - Closing the browser tab does not stop it: use the Quit button (or Ctrl+C in the terminal).
 - Testing: set LEPTONS_DADOS=/path/to/a/copy to run it on a copy of the .db files instead of the real ones.
