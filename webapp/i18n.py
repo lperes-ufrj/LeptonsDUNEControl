@@ -7,7 +7,7 @@ O idioma fica num cookie do navegador, então vale também na tela de login.
 """
 import re
 
-from flask import has_request_context, request
+from flask import g, has_request_context, request
 from markupsafe import Markup, escape
 
 from .textos_pt import PADROES, PT, PT_JS
@@ -17,8 +17,11 @@ COOKIE = "idioma"
 
 
 def idioma():
-    """'pt' ou 'en' (padrão), conforme o cookie; fora de uma página (servidor do QR code, PDFs) é sempre 'en'."""
-    if has_request_context() and request.cookies.get(COOKIE) in IDIOMAS:
+    """'pt' ou 'en' (padrão), conforme o cookie; fora de uma página (servidor do QR code, PDFs) é sempre 'en'.
+
+    g.so_ingles = True força o inglês numa página (ex.: os CSV das estatísticas, em inglês como os relatórios).
+    """
+    if has_request_context() and not g.get("so_ingles") and request.cookies.get(COOKIE) in IDIOMAS:
         return request.cookies[COOKIE]
     return "en"
 

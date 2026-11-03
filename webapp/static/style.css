@@ -554,3 +554,20 @@ a.pill:hover { filter: brightness(.95); text-decoration: underline; }
   .dupla { grid-template-columns: 1fr; }
 }
 .grafico.alto { height: 260px; }
+/* janela Export CSV das estatísticas */
+.grade-csv { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin: 10px 0 14px; }
+.grupo-csv { border: 1px solid var(--borda); border-radius: 8px; padding: 6px 12px 10px; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.grupo-csv legend { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--suave); padding: 0 4px; }
+.grupo-csv .marcar { font-size: 13px !important; align-items: flex-start; }
+.grupo-csv .marcar input { margin-top: 3px; }
+.grupo-csv .marcar.sem { color: var(--muito-suave) !important; cursor: default; }
+.formato-csv { gap: 8px 18px; }
+.formato-csv .rotulo-campo { padding-top: 0; }
+.formato-csv .marcar { font-size: 13px !important; }
+@media (max-width: 700px) { .grade-csv { grid-template-columns: 1fr; } }
+/* linhas das tabelas e barras que abrem a janela com as samples */
+.grafico .alvo.clicavel { cursor: pointer; }
+.tabela-estat tbody tr.sem-membros { cursor: default; }
+.tabela-estat tbody tr.sem-membros:hover td { background: none; }
+.tabela-estat tbody tr[data-linha]:focus-visible { outline: 2px solid var(--acento); outline-offset: -2px; }
+#dlg-membros td.mono:last-child { white-space: normal; }

@@ -2,12 +2,18 @@
 
 Só lê os bancos, com as mesmas regras das outras telas (dados.py). Os histogramas já saem daqui com as faixas
 contadas; o estatisticas.js só desenha. Cada gráfico leva também a sua tabela (para ver os números sem o mouse).
+A janela Export CSV gera os mesmos números em CSV (em inglês, como os relatórios): um arquivo ou um .zip.
+Cada linha das tabelas (e cada barra) leva também os seus "membros": as samples que ela conta, [id, detalhe], que a
+página mostra numa janela ao clicar.
 """
+import csv
+import io
 import math
 import statistics
-from datetime import date, timedelta
+import zipfile
+from datetime import date, datetime, timedelta
 
-from . import chegada, dados
+from . import chegada, dados, lotes
 from .i18n import t
 
 COR_POSICAO = {2: 1, 3: 2, 14: 3}          # posição -> cor da série (1, 2, 3 = azul, laranja, verde-água)
@@ -52,11 +58,14 @@ def _faixas(todos, n_alvo=12, fixos=()):
     return [round(inicio + i * passo, 10) for i in range(n + 1)]
 
 
+def _faixa_de(v, bordas):
+    return max(min(int((v - bordas[0]) // (bordas[1] - bordas[0])), len(bordas) - 2), 0)
+
+
 def _contar(valores, bordas):
     contagens = [0] * (len(bordas) - 1)
     for v in valores:
-        i = min(int((v - bordas[0]) // (bordas[1] - bordas[0])), len(contagens) - 1)
-        contagens[max(i, 0)] += 1
+        contagens[_faixa_de(v, bordas)] += 1
     return contagens
 
 
@@ -64,10 +73,11 @@ def _fmt(x, casas):
     return "–" if x is None else f"{x:.{casas}f}"
 
 
-def histograma(series, unidade, casas=0, limites=(), n_alvo=12, estender=True):
+def histograma(series, unidade, casas=0, limites=(), n_alvo=12, estender=True, refs=None):
     """series = [(nome, cor, [valores])] com as mesmas faixas; limites = [(valor, rótulo)] (linhas de referência).
 
     estender: as faixas vão até os limites (False quando eles estão longe dos dados: o gráfico só os mostra se couberem).
+    refs: [(id da sample, detalhe)] na ordem dos valores da série (um histograma de uma série): os membros de cada faixa.
     """
     todos = [v for _, _, vs in series for v in vs]
     if not todos:
@@ -88,6 +98,11 @@ def histograma(series, unidade, casas=0, limites=(), n_alvo=12, estender=True):
     saida["tabela"] = {"cab": [unidade] + [s["nome"] for s in saida["series"]],
                        "linhas": [[faixa(i)] + [s["contagens"][i] for s in saida["series"]]
                                   for i in range(len(bordas) - 1)]}
+    if refs is not None:
+        membros = [[] for _ in range(len(bordas) - 1)]
+        for v, ref in sorted(zip(series[0][2], refs), key=lambda par: par[0]):
+            membros[_faixa_de(v, bordas)].append(list(ref))
+        saida["membros"] = membros
     return saida
 
 
@@ -95,8 +110,8 @@ def _semana(d):
     return d - timedelta(days=d.weekday())
 
 
-def por_periodo(datas):
-    """Samples depositadas por semana (até ~6 meses) ou por mês, com os períodos vazios no meio."""
+def por_periodo(datas, refs=()):
+    """Samples depositadas por semana (até ~6 meses) ou por mês, com os períodos vazios no meio; refs = ids, na ordem."""
     if not datas:
         return None
     lo, hi = min(datas), max(datas)
@@ -107,9 +122,10 @@ def por_periodo(datas):
         rotulo = lambda d: d.strftime("%Y-%m")
     else:
         chave, passo, rotulo = _semana, (lambda d: d + timedelta(days=7)), (lambda d: d.strftime("%m-%d"))
-    contagem = {}
-    for d in datas:
+    contagem, membros = {}, {}
+    for d, ref in sorted(zip(datas, refs), key=lambda par: par[0]):
         contagem[chave(d)] = contagem.get(chave(d), 0) + 1
+        membros.setdefault(chave(d), []).append([ref, d.isoformat()])
     periodos, p = [], chave(lo)
     while p <= chave(hi):
         periodos.append(p)
@@ -120,17 +136,28 @@ def por_periodo(datas):
     return {"tipo": "colunas", "rotulos": nomes, "valores": valores, "mensal": mensal,
             "dicas": [(p.strftime("%Y-%m") if mensal else t("week of {d}", d=p.isoformat())) for p in periodos],
             "tabela": {"cab": [titulo, t("Samples")],
-                       "linhas": [[p.strftime("%Y-%m") if mensal else p.isoformat(), v] for p, v in zip(periodos, valores)]}}
+                       "linhas": [[p.strftime("%Y-%m") if mensal else p.isoformat(), v] for p, v in zip(periodos, valores)]},
+            "membros": [membros.get(p, []) for p in periodos]}
 
 
-def barras(itens, unidade="", casas=0, total=None):
-    """Barras horizontais [(nome, valor)]; com total, o valor é mostrado também como % do total."""
+def barras(itens, unidade="", casas=0, total=None, membros=None):
+    """Barras horizontais [(nome, valor)]; com total, o valor é mostrado também como % do total.
+
+    membros = {nome: [[id, detalhe]]}: as samples de cada barra.
+    """
     if not itens:
         return None
-    return {"tipo": "barras", "unidade": unidade, "casas": casas, "total": total,
-            "itens": [{"nome": n, "valor": v} for n, v in itens],
-            "tabela": {"cab": ["", unidade or t("count")] + (["%"] if total else []),
-                       "linhas": [[n, v] + ([f"{100 * v / total:.1f}"] if total else []) for n, v in itens]}}
+    saida = {"tipo": "barras", "unidade": unidade, "casas": casas, "total": total,
+             "itens": [{"nome": n, "valor": v} for n, v in itens],
+             "tabela": {"cab": ["", unidade or t("count")] + (["%"] if total else []),
+                        "linhas": [[n, v] + ([f"{100 * v / total:.1f}"] if total else []) for n, v in itens]}}
+    if membros is not None:
+        saida["membros"] = [membros.get(n, []) for n, _ in itens]
+    return saida
+
+
+def _filtros_txt(numeros):
+    return t("filter {n}", n=numeros[0]) if len(numeros) == 1 else t("filters {lista}", lista=lotes.faixas(numeros))
 
 
 def _densidade_posicao(m):
@@ -165,6 +192,11 @@ def ler_amostras():
         conn.close()
 
 
+def _ordem(d):
+    """Ordem das samples nas janelas e no CSV: pela run (as sem run no fim), depois pelo id."""
+    return d["numero"] == "", int(d["numero"] or 0), d["id"]
+
+
 def calcular(de=None, ate=None, lote=""):
     """Tudo o que a página mostra, para as samples depositadas entre de e ate (datas) e do OPTO batch escolhido."""
     todas = ler_amostras()
@@ -173,55 +205,76 @@ def calcular(de=None, ate=None, lote=""):
            if (not de or (d["data"] and d["data"] >= de)) and (not ate or (d["data"] and d["data"] <= ate))
            and (not lote or any(l["opto"] == lote for l in d["lotes"]))]
     sem_data = sum(1 for d in sel if not d["data"])
+    sel = sorted(sel, key=_ordem)
 
     # ---- deposição: densidade de massa por posição, uniformidade e evolução por run
     dens = {p: [] for p in dados.POSICOES}
-    por_run, razoes = [], []
+    refs_dens = {p: [] for p in dados.POSICOES}
+    por_run, razoes, refs_razoes = [], [], []
     for d in sel:
         linha = {}
         for p in dados.POSICOES:
             x = _densidade_posicao(d["massas"].get(p) or {})
             if x is not None:
                 dens[p].append(x)
+                refs_dens[p].append((d["id"], f"{x:.1f} µg/cm²"))
                 linha[p] = x
         if linha.get(2) and 14 in linha:
             razoes.append(linha[14] / linha[2])
+            refs_razoes.append((d["id"], f"{linha[14] / linha[2]:.3f}  ({linha[14]:.1f} ÷ {linha[2]:.1f})"))
         if d["numero"] and linha:
-            por_run.append((int(d["numero"]), linha))
+            por_run.append((int(d["numero"]), linha, d["id"]))
     por_run.sort(key=lambda r: r[0])
     nome_pos = NOME_POSICAO
     linhas = None
     if por_run:
-        linhas = {"tipo": "linhas", "unidade": "µg/cm²", "x": [r for r, _ in por_run],
-                  "series": [{"nome": nome_pos[p], "cor": COR_POSICAO[p], "valores": [l.get(p) for _, l in por_run]}
+        linhas = {"tipo": "linhas", "unidade": "µg/cm²", "x": [r for r, _, _ in por_run],
+                  "series": [{"nome": nome_pos[p], "cor": COR_POSICAO[p], "valores": [l.get(p) for _, l, _ in por_run]}
                              for p in dados.POSICOES],
                   "tabela": {"cab": ["Run"] + [nome_pos[p] for p in dados.POSICOES],
-                             "linhas": [[r] + [_fmt(l.get(p), 1) for p in dados.POSICOES] for r, l in por_run]}}
+                             "linhas": [[r] + [_fmt(l.get(p), 1) for p in dados.POSICOES] for r, l, _ in por_run]},
+                  "membros": [[[i, " · ".join(f"P{p:02d} {_fmt(l.get(p), 1)}" for p in dados.POSICOES)]]
+                              for _, l, i in por_run]}
 
     # ---- inspeção visual: classificação e defeitos (filtros com a linha preenchida)
     classes = {"A": 0, "B": 0, "C": 0}
     defeitos = {nome: 0 for nome in ("Visual: Fail", "Uniformity: Minor", "Uniformity: Major", "Stains",
                                      "Particles", "Edge", "Finger", "Other")}
     inspecionados = 0
+    filtros_de = {}                       # (barra, id) -> números dos filtros: os membros de cada barra
+    def conta(barra, d, n):
+        filtros_de.setdefault((barra, d["id"]), []).append(n)
     for d in sel:
-        for f in d["filtros"].values():
+        for n, f in sorted(d["filtros"].items()):
             if f.get("classification") in classes:
                 classes[f["classification"]] += 1
+                conta(f["classification"], d, n)
             if not f.get("visual_status"):
                 continue
             inspecionados += 1
-            defeitos["Visual: Fail"] += f.get("visual_status") == "Fail"
-            defeitos["Uniformity: Minor"] += f.get("uniformity") == "Minor"
-            defeitos["Uniformity: Major"] += f.get("uniformity") == "Major"
-            for col, nome in (("stains", "Stains"), ("particles", "Particles"), ("edge_defects", "Edge"),
-                              ("finger_defects", "Finger"), ("other_defects", "Other")):
-                defeitos[nome] += f.get(col) == "Yes"
+            achados = [("Visual: Fail", f.get("visual_status") == "Fail"), ("Uniformity: Minor", f.get("uniformity") == "Minor"),
+                       ("Uniformity: Major", f.get("uniformity") == "Major")]
+            achados += [(nome, f.get(col) == "Yes") for col, nome in (
+                ("stains", "Stains"), ("particles", "Particles"), ("edge_defects", "Edge"),
+                ("finger_defects", "Finger"), ("other_defects", "Other"))]
+            for nome, sim in achados:
+                defeitos[nome] += sim
+                if sim:
+                    conta(nome, d, n)
     n_classes = sum(classes.values())
+    membros_filtros = {}
+    for (barra, i), ns in filtros_de.items():           # sel já está na ordem das runs
+        membros_filtros.setdefault(barra, []).append([i, _filtros_txt(ns)])
+    membros_classes = {f"{k} → {acao}": membros_filtros.get(k, []) for k, acao in CLASSES}
 
     # ---- imersão criogênica e eficiência óptica (amostras P02/P03/P14)
-    var_im = [x for d in sel for a in dados.AMOSTRAS
-              if (x := _variacao_imersao(d["im_massas"].get(a) or {})) is not None]
-    efs, dens_ef = [], []
+    var_im, refs_im = [], []
+    for d in sel:
+        for a in dados.AMOSTRAS:
+            if (x := _variacao_imersao(d["im_massas"].get(a) or {})) is not None:
+                var_im.append(x)
+                refs_im.append((d["id"], f"{a} · {x:+.2f} %"))
+    efs, dens_ef, refs_efs, refs_dens_ef = [], [], [], []
     for d in sel:
         for a in dados.AMOSTRAS:
             r = d["ef_amostras"].get(a) or {}
@@ -229,22 +282,27 @@ def calcular(de=None, ate=None, lote=""):
                 continue
             if (x := dados.numero(r.get("eficiencia"))) is not None:
                 efs.append(x)
+                refs_efs.append((d["id"], f"{a} · {x:.3f}"))
             if (x := dados.numero(r.get("densidade_ug_cm2"))) is not None:
                 dens_ef.append(x)
+                refs_dens_ef.append((d["id"], f"{a} · {x:.1f} µg/cm²"))
     itens_im = [v for d in sel for v in d["im_itens"].values() if v in ("Yes", "No")]
 
     # ---- batches: samples por internal lot e filtros recebidos
-    por_interno = {}
+    por_interno, membros_internos = {}, {}
     for d in sel:
         for l in d["lotes"]:
             nome = l["interno"] or l["opto"] or "?"
             por_interno[nome] = por_interno.get(nome, 0) + 1
+            membros_internos.setdefault(nome, []).append([d["id"], f"OPTO batch {l['opto']}" if l["opto"] else ""])
     lotes_reg = [l for l in chegada.listar() if not lote or l.get("lote_geral") == lote]
     recebidos = sum(int(x) for l in lotes_reg if str(x := l.get("total_filtros") or "").isdigit())
 
     lim = dados.LIMITE_PERDA_PCT
     return {
-        "optos": optos, "n_total": len(todas), "n": len(sel), "sem_data": sem_data,
+        "sel": sel, "optos": optos,
+        "amostras": {d["id"]: [d["numero"] or "", d["tarefa"].get("codigo_tarefa") or "", d["tarefa"].get("data_inicio") or "",
+                               d["status"]] for d in sel}, "n_total": len(todas), "n": len(sel), "sem_data": sem_data,
         "status": {s: sum(1 for d in sel if d["status"] == s) for s in dados.STATUS_TODOS},
         "decisao": {k: sum(1 for d in sel if d["decisao"] == k) for k in ("Approved", "Rejected", "Pending")},
         "filtros_dep": len(sel) * dados.N_FILTROS, "filtros_rec": recebidos, "n_lotes": len(lotes_reg),
@@ -253,22 +311,167 @@ def calcular(de=None, ate=None, lote=""):
         "itens_im": {"Yes": itens_im.count("Yes"), "No": itens_im.count("No")},
         "ef_ok": sum(1 for x in efs if round(x, 6) >= dados.LIMITE_EFICIENCIA), "n_ef": len(efs),
         "graficos": {
-            "periodo": por_periodo([d["data"] for d in sel if d["data"]]),
+            "periodo": por_periodo([d["data"] for d in sel if d["data"]], [d["id"] for d in sel if d["data"]]),
             # um histograma por posição, cada um com as suas faixas (as médias são bem diferentes)
-            **{f"densidade_{p}": histograma([(nome_pos[p], COR_POSICAO[p], dens[p])], "µg/cm²", 1, n_alvo=10)
+            **{f"densidade_{p}": histograma([(nome_pos[p], COR_POSICAO[p], dens[p])], "µg/cm²", 1, n_alvo=10,
+                                            refs=refs_dens[p])
                for p in dados.POSICOES},
             "por_run": linhas,
-            "uniformidade": histograma([(t("External ÷ Center"), 1, razoes)], t("ratio"), 3, n_alvo=10),
-            "classes": barras([(f"{k} → {acao}", classes[k]) for k, acao in CLASSES], t("filters"), total=n_classes)
-                       if n_classes else None,
-            "defeitos": barras(list(defeitos.items()), t("filters"), total=inspecionados) if inspecionados else None,
+            "uniformidade": histograma([(t("External ÷ Center"), 1, razoes)], t("ratio"), 3, n_alvo=10, refs=refs_razoes),
+            "classes": barras([(f"{k} → {acao}", classes[k]) for k, acao in CLASSES], t("filters"), total=n_classes,
+                              membros=membros_classes) if n_classes else None,
+            "defeitos": barras(list(defeitos.items()), t("filters"), total=inspecionados, membros=membros_filtros)
+                        if inspecionados else None,
             "imersao": histograma([(t("Mass change"), 1, var_im)], "%", 2,
                                   [(-lim, f"−{lim:g} %"), (lim, f"+{lim:g} %")] if var_im else (), n_alvo=10,
-                                  estender=False),
+                                  estender=False, refs=refs_im),
             "eficiencia": histograma([(t("Relative efficiency"), 1, efs)], t("relative efficiency"), 3,
                                      [(dados.LIMITE_EFICIENCIA, t("limit {x}", x=dados.LIMITE_EFICIENCIA))] if efs else (),
-                                     n_alvo=10),
-            "dens_ef": histograma([(t("Witness sample density"), 1, dens_ef)], "µg/cm²", 1, n_alvo=10),
-            "internos": barras(sorted(por_interno.items(), key=lambda kv: -kv[1]), t("samples")),
+                                     n_alvo=10, refs=refs_efs),
+            "dens_ef": histograma([(t("Witness sample density"), 1, dens_ef)], "µg/cm²", 1, n_alvo=10, refs=refs_dens_ef),
+            "internos": barras(sorted(por_interno.items(), key=lambda kv: -kv[1]), t("samples"), membros=membros_internos),
         },
     }
+
+
+# =====================================================================
+# EXPORTAÇÃO CSV (janela Export CSV): os números de cada gráfico, o resumo e os dados de cada sample
+# =====================================================================
+# (grupo, chave, nome do arquivo, título): a ordem é a da janela e a dos arquivos no .zip
+ITENS_CSV = [
+    ("General", "resumo", "summary", "Summary"),
+    ("General", "descritiva", "descriptive_statistics", "Descriptive statistics (n, mean, s.d., min, max)"),
+    ("General", "amostras", "data_per_sample", "Data per sample (one row per sample)"),
+    ("General", "periodo", "samples_per_period", "Samples deposited per week / month"),
+    ("Deposition · Mass control", "densidade_2", "mass_density_center_p02", "Mass density · Center (P02) – histogram"),
+    ("Deposition · Mass control", "densidade_3", "mass_density_middle_p03", "Mass density · Middle (P03) – histogram"),
+    ("Deposition · Mass control", "densidade_14", "mass_density_external_p14", "Mass density · External (P14) – histogram"),
+    ("Deposition · Mass control", "por_run", "mass_density_per_run", "Mass density per run"),
+    ("Deposition · Mass control", "uniformidade", "radial_uniformity", "Radial uniformity – histogram"),
+    ("Deposition · Mass control", "internos", "samples_per_internal_lot", "Samples per internal lot"),
+    ("Visual inspection", "classes", "visual_classification", "Classification"),
+    ("Visual inspection", "defeitos", "visual_defects", "Defects found"),
+    ("Cryogenic immersion · Optical efficiency", "imersao", "immersion_mass_change", "Mass change after immersion – histogram"),
+    ("Cryogenic immersion · Optical efficiency", "eficiencia", "relative_efficiency", "Relative efficiency – histogram"),
+    ("Cryogenic immersion · Optical efficiency", "dens_ef", "witness_sample_density", "Witness sample density – histogram"),
+]
+CHAVES_CSV = [i[1] for i in ITENS_CSV]
+
+
+def grupos_csv(e):
+    """Itens da janela por grupo: [(grupo, [(chave, título, tem dados)])]."""
+    grupos = {}
+    for grupo, chave, _arq, titulo in ITENS_CSV:
+        tem = e["n"] > 0 if chave in ("resumo", "descritiva", "amostras") else bool(e["graficos"].get(chave))
+        grupos.setdefault(grupo, []).append((chave, titulo, tem))
+    return list(grupos.items())
+
+
+def _num(x, casas=4):
+    return "" if x is None else round(x, casas)
+
+
+def _por_amostra(d):
+    """Uma linha do CSV 'Data per sample'."""
+    t_, dens_ = d["tarefa"], {p: _densidade_posicao(d["massas"].get(p) or {}) for p in dados.POSICOES}
+    _, classes, _ = dados.resumo_visual(d)
+    linha = [d["id"], d["numero"], t_.get("codigo_tarefa") or "", t_.get("data_inicio") or "", t_.get("responsavel") or "",
+             "; ".join(dict.fromkeys(l["opto"] for l in d["lotes"] if l["opto"])),
+             "; ".join(l["interno"] for l in d["lotes"] if l["interno"]),
+             d["status"], d["decisao"], dados.TXT_ESTADO[d["estado_imersao"]], dados.TXT_ESTADO[d["estado_eficiencia"]]]
+    linha += [_num(dens_[p], 2) for p in dados.POSICOES]
+    linha.append(_num(dens_[14] / dens_[2]) if dens_[2] and dens_[14] is not None else "")
+    linha += [classes[k] for k in "ABC"]
+    linha += [_num(_variacao_imersao(d["im_massas"].get(a) or {}), 3) for a in dados.AMOSTRAS]
+    for campo in ("eficiencia", "densidade_ug_cm2"):
+        for a in dados.AMOSTRAS:
+            r = d["ef_amostras"].get(a) or {}
+            linha.append(_num(dados.numero(r.get(campo)), 3) if r.get("testada") == "Yes" else "")
+    return linha
+
+
+def tabela_csv(e, chave):
+    """(cabeçalho, linhas) do item; None se o item não tem dados nesta seleção."""
+    if chave == "resumo":
+        linhas = [["Samples", e["n"]], ["Samples without a deposition date", e["sem_data"]],
+                  ["Filters deposited", e["filtros_dep"]]]
+        linhas += [[f"Status: {s}", n] for s, n in e["status"].items()]
+        linhas += [[f"Batch decision: {k}", n] for k, n in e["decisao"].items()]
+        linhas += [["Filters inspected (visual)", e["inspecionados"]]]
+        linhas += [[f"Filters classified {k}", n] for k, n in e["classes"].items()]
+        linhas += [["Post-immersion checks: Yes", e["itens_im"]["Yes"]], ["Post-immersion checks: No", e["itens_im"]["No"]],
+                   ["Optical efficiency measurements", e["n_ef"]],
+                   [f"Optical efficiency measurements >= {dados.LIMITE_EFICIENCIA}", e["ef_ok"]],
+                   ["OPTO batches", e["n_lotes"]], ["Filters received (OPTO batches)", e["filtros_rec"]]]
+        return ["Item", "Value"], linhas
+    if chave == "descritiva":
+        linhas = []
+        for c in CHAVES_CSV:
+            g = e["graficos"].get(c)
+            if g and g["tipo"] == "histograma":
+                for s in g["series"]:
+                    linhas.append([s["nome"], g["unidade"], s["n"]] + [_num(s.get(k)) for k in ("media", "dp", "min", "max")])
+        return (["Quantity", "Unit", "n", "Mean", "S.D.", "Min", "Max"], linhas) if linhas else None
+    if chave == "amostras":
+        if not e["sel"]:
+            return None
+        cab = ["Record ID", "Run", "PID", "Deposition date", "Responsible", "OPTO batch", "Internal lot", "Status",
+               "Batch decision", "Cryogenic immersion", "Optical efficiency"]
+        cab += [f"Mass density {NOME_POSICAO[p]} (µg/cm²)" for p in dados.POSICOES]
+        cab += ["External ÷ Center", "Filters A", "Filters B", "Filters C"]
+        cab += [f"Immersion mass change {a} (%)" for a in dados.AMOSTRAS]
+        cab += [f"Relative efficiency {a}" for a in dados.AMOSTRAS]
+        cab += [f"Witness sample density {a} (µg/cm²)" for a in dados.AMOSTRAS]
+        return cab, [_por_amostra(d) for d in e["sel"]]
+    g = e["graficos"].get(chave)
+    if not g:
+        return None
+    if g["tipo"] == "histograma":
+        b = g["bordas"]
+        return ([f"From ({g['unidade']})", f"To ({g['unidade']})"] + [s["nome"] for s in g["series"]],
+                [[_num(b[i], 6), _num(b[i + 1], 6)] + [s["contagens"][i] for s in g["series"]] for i in range(len(b) - 1)])
+    if g["tipo"] == "colunas":
+        return ["Month" if g["mensal"] else "Week of", "Samples"], g["tabela"]["linhas"]
+    if g["tipo"] == "linhas":
+        return (["Run"] + [f"{s['nome']} ({g['unidade']})" for s in g["series"]],
+                [[x] + [_num(s["valores"][i], 2) for s in g["series"]] for i, x in enumerate(g["x"])])
+    return g["tabela"]["cab"], g["tabela"]["linhas"]           # barras
+
+
+def _csv(cab, linhas):
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(cab)
+    w.writerows(linhas)
+    return buf.getvalue()
+
+
+def exportar(e, chaves, um_arquivo, selecao):
+    """(conteúdo, nome do arquivo, tipo) com os itens escolhidos; None se nenhum tem dados.
+
+    selecao = [(item, valor)] (período, OPTO batch, quem gerou): vai no começo do arquivo único ou em selection.csv.
+    Um item só sai sempre como um .csv; vários saem num .zip (um .csv cada) ou num .csv com uma seção por item.
+    """
+    itens = [(arq, titulo, tab) for _g, chave, arq, titulo in ITENS_CSV
+             if chave in chaves and (tab := tabela_csv(e, chave))]
+    if not itens:
+        return None
+    carimbo = datetime.now().strftime("%Y-%m-%d")
+    if len(itens) == 1:
+        arq, _titulo, (cab, linhas) = itens[0]
+        return _csv(cab, linhas).encode("utf-8"), f"statistics_{arq}_{carimbo}.csv", "text/csv"
+    if um_arquivo:
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        for titulo, (cab, linhas) in [("Selection", (["Item", "Value"], selecao))] + [(t_, tab) for _a, t_, tab in itens]:
+            w.writerow([f"# {titulo}"])
+            w.writerow(cab)
+            w.writerows(linhas)
+            w.writerow([])
+        return buf.getvalue().encode("utf-8"), f"statistics_{carimbo}.csv", "text/csv"
+    mem = io.BytesIO()
+    with zipfile.ZipFile(mem, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("00_selection.csv", _csv(["Item", "Value"], selecao))
+        for n, (arq, _titulo, (cab, linhas)) in enumerate(itens, 1):
+            z.writestr(f"{n:02d}_{arq}.csv", _csv(cab, linhas))
+    return mem.getvalue(), f"statistics_{carimbo}.zip", "application/zip"

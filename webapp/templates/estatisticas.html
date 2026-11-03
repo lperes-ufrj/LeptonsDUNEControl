@@ -4,7 +4,7 @@
 {# um gráfico: título, subtítulo, o desenho (estatisticas.js) e a tabela com os mesmos números #}
 {% macro grafico(chave, titulo, sub='', classe='') %}
 {% set g = e.graficos[chave] %}
-<figure class="grafico-bloco">
+<figure class="grafico-bloco" data-titulo="{{ titulo }}">
   <figcaption><b>{{ titulo }}</b>{% if sub %}<small>{{ sub }}</small>{% endif %}</figcaption>
   {% if g and g.tipo == 'linhas' %}
   <div class="legenda-grafico">{% for s in g.series %}<span><i style="background: var(--serie-{{ s.cor }})"></i>{{ s.nome }}</span>{% endfor %}</div>
@@ -14,9 +14,11 @@
   {% if g.tipo == 'histograma' %}<div class="estat-linha">{% for s in g.series %}{{ s.texto }}{% endfor %}</div>{% endif %}
   <details class="ver-tabela">
     <summary>{{ _("Table") }}</summary>
-    <div class="rolagem"><table class="tabela-tarefas">
+    {# cada linha com samples abre a janela com elas (estatisticas.js) #}
+    <div class="rolagem"><table class="tabela-tarefas tabela-estat">
       <thead><tr>{% for c in g.tabela.cab %}<th class="{{ 'num' if not loop.first }}">{{ c }}</th>{% endfor %}</tr></thead>
-      <tbody>{% for l in g.tabela.linhas %}<tr>{% for v in l %}<td class="{{ 'num mono' if not loop.first else 'mono' }}">{{ v }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+      <tbody>{% for l in g.tabela.linhas %}{% set m = g.membros[loop.index0] if g.membros else [] %}
+        <tr{% if m %} data-linha="{{ loop.index0 }}" tabindex="0" title="{{ _('Show the samples') }}"{% else %} class="sem-membros"{% endif %}>{% for v in l %}<td class="{{ 'num mono' if not loop.first else 'mono' }}">{{ v }}</td>{% endfor %}</tr>{% endfor %}</tbody>
     </table></div>
   </details>
   {% else %}
@@ -53,6 +55,7 @@
       {% for o in e.optos %}<option {{ 'selected' if o == lote_sel }}>{{ o }}</option>{% endfor %}
     </select></label>
   <button class="botao primario">{{ _("Apply") }}</button>
+  <button type="button" class="botao" id="abrir-csv">{{ _("Export CSV…") }}</button>
   {% if de or ate or lote_sel %}<a class="botao" href="{{ url_for('estatisticas_pagina') }}">{{ _("Clear") }}</a>{% endif %}
 </form>
 
@@ -118,6 +121,83 @@
   </div>
 </div>
 
+{# janela Export CSV: escolhe exatamente o que exportar, para a mesma seleção da página #}
+<dialog id="dlg-csv" class="dialogo medio">
+  <form method="get" action="{{ url_for('estatisticas_csv') }}" id="form-csv">
+    {% if de %}<input type="hidden" name="from" value="{{ de }}">{% endif %}
+    {% if ate %}<input type="hidden" name="to" value="{{ ate }}">{% endif %}
+    {% if lote_sel %}<input type="hidden" name="batch" value="{{ lote_sel }}">{% endif %}
+    <div class="dialogo-topo"><h2>{{ _("Export statistics (CSV)") }}</h2><button type="button" class="x" data-fechar>✕</button></div>
+    <div class="dialogo-corpo">
+      <p class="nota">{{ _("Same selection as the page:") }}
+        <b>{% if de or ate %}{% if de %}{{ _("from") }} {{ de }}{% endif %} {% if ate %}{{ _("to") }} {{ ate }}{% endif %}{% else %}{{ _("All time") }}{% endif %}
+        · {{ lote_sel or _("All batches") }} · {{ _("{n} of {total} samples", n=e.n, total=e.n_total) }}</b>.
+        {{ _("The files are in English, like the reports.") }}</p>
+      <div class="linha-botoes csv-todos">
+        <button type="button" class="botao mini-botao" data-marcar="1">{{ _("Select all") }}</button>
+        <button type="button" class="botao mini-botao" data-marcar="0">{{ _("Select none") }}</button>
+        <span class="suave pequeno" id="csv-contagem"></span>
+      </div>
+      <div class="grade-csv">
+        {% for grupo, itens in grupos_csv %}
+        <fieldset class="grupo-csv">
+          <legend>{{ grupo|tr }}</legend>
+          {% for chave, titulo, tem in itens %}
+          <label class="marcar {{ 'sem' if not tem }}"><input type="checkbox" name="item" value="{{ chave }}" {{ 'checked' if tem else 'disabled' }}>
+            <span>{{ titulo|tr }}{% if not tem %} <small class="suave">({{ _("no data") }})</small>{% endif %}</span></label>
+          {% endfor %}
+        </fieldset>
+        {% endfor %}
+      </div>
+      <div class="linha-campos formato-csv">
+        <span class="rotulo-campo">{{ _("Format") }}</span>
+        <label class="marcar"><input type="radio" name="format" value="zip" checked> {{ _("One CSV file per item, in a .zip") }}</label>
+        <label class="marcar"><input type="radio" name="format" value="one"> {{ _("Everything in one CSV file (one section per item)") }}</label>
+      </div>
+      <p class="nota">{{ _("With a single item chosen, the download is that one .csv file.") }}</p>
+    </div>
+    <div class="dialogo-rodape">
+      <button type="button" class="botao" data-fechar>{{ _("Cancel") }}</button>
+      <button class="botao primario" id="csv-exportar">{{ _("Export") }}</button>
+    </div>
+  </form>
+</dialog>
+<script>
+  (function () {
+    const dlg = document.getElementById("dlg-csv"), form = document.getElementById("form-csv");
+    const caixas = [...form.querySelectorAll('input[name="item"]:not(:disabled)')];
+    const contar = () => {
+      const n = caixas.filter((c) => c.checked).length;
+      document.getElementById("csv-contagem").textContent = T("{n} of {total} chosen", { n, total: caixas.length });
+      document.getElementById("csv-exportar").disabled = n === 0;
+      form.querySelectorAll('input[name="format"]').forEach((r) => r.disabled = n < 2);
+    };
+    document.getElementById("abrir-csv").addEventListener("click", () => { contar(); dlg.showModal(); });
+    dlg.querySelectorAll("[data-fechar]").forEach((b) => b.addEventListener("click", () => dlg.close()));
+    dlg.querySelectorAll("[data-marcar]").forEach((b) => b.addEventListener("click", () => {
+      caixas.forEach((c) => c.checked = b.dataset.marcar === "1");
+      contar();
+    }));
+    caixas.forEach((c) => c.addEventListener("change", contar));
+    form.addEventListener("submit", () => setTimeout(() => dlg.close(), 300));     // o arquivo baixa; a página fica
+  })();
+</script>
+
+{# janela com as samples de uma linha da tabela (ou de uma barra): preenchida pelo estatisticas.js #}
+<dialog id="dlg-membros" class="dialogo medio" data-url="{{ url_for('tarefa', tarefa_id=0)[:-1] }}">
+  <div class="dialogo-topo"><h2 id="membros-titulo"></h2><button type="button" class="x" data-fechar>✕</button></div>
+  <div class="dialogo-corpo">
+    <p class="nota"><b id="membros-faixa"></b> · <span id="membros-contagem"></span></p>
+    <div class="lista-dialogo alta"><table class="tabela-tarefas selecionavel">
+      <thead><tr><th>Run</th><th>PID</th><th>Deposition</th><th>Status</th><th>{{ _("Details") }}</th></tr></thead>
+      <tbody id="membros-linhas"></tbody>
+    </table></div>
+    <p class="nota">{{ _("Click a sample to open it.") }}</p>
+  </div>
+  <div class="dialogo-rodape"><button type="button" class="botao" data-fechar>{{ _("Close") }}</button></div>
+</dialog>
+
 <script type="application/json" id="dados-graficos">{{ e.graficos|tojson }}</script>
+<script type="application/json" id="dados-amostras">{{ e.amostras|tojson }}</script>
 <script src="{{ url_for('static', filename='estatisticas.js') }}"></script>
 {% endblock %}

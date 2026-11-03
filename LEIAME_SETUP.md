@@ -46,6 +46,11 @@ Browser app (branch browser-app)
   run, radial uniformity (External ÷ Center), visual classification and defects, mass change after cryogenic
   immersion, relative optical efficiency (with the 0.75 limit) and the samples per internal lot. Filter by period
   (presets or From/To on the deposition date) and by OPTO batch; every chart has a "Table" with its numbers.
+  Clicking a table row (or a bar, or a run on the per-run chart) opens a window with the samples it counts – run, PID,
+  date, status and the value (or the filter numbers, for the visual inspection) – and clicking a sample opens it.
+  "Export CSV…" (next to Apply) opens a window to choose exactly what to export for that same selection: the
+  summary, descriptive statistics, one row per sample, and each chart's numbers. Several items come as a .zip with one
+  CSV each (plus 00_selection.csv) or as one CSV with a section per item. The CSV files are always in English.
 - When a sample uses more than one box or batch, the sample form shows a "Filter origin…" button: a window to say
   which of the 28 filters came from which box/batch (type a range, e.g. 1–20 → box A, or pick each filter). The sample
   page, the HTML report and the PDF show the ranges per box. Stored in the filtro_origem table (rastreabilidade.db);

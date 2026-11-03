@@ -1,7 +1,9 @@
 // Aba Statistics: desenha os gráficos (SVG) com os números já contados no servidor (estatisticas.py).
-// Cada gráfico tem também a sua tabela na página; aqui só o desenho e a dica do mouse/teclado.
+// Cada gráfico tem também a sua tabela na página; aqui o desenho, a dica do mouse/teclado e a janela com as samples
+// de uma linha da tabela ou de uma barra (os "membros" que o servidor manda junto).
 (function () {
   const G = JSON.parse(document.getElementById("dados-graficos").textContent);
+  const AM = JSON.parse(document.getElementById("dados-amostras").textContent);   // id -> [run, PID, data, status]
   const NS = "http://www.w3.org/2000/svg";
   const M = { t: 16, r: 14, b: 30, l: 42 };          // margens do desenho
   const cor = (n) => `var(--serie-${n || 1})`;
@@ -63,9 +65,69 @@
   }
   const esconder = () => { dica.hidden = true; };
 
+  // ---------------- janela com as samples de uma linha / barra ----------------
+  const dlg = document.getElementById("dlg-membros");
+  dlg.querySelectorAll("[data-fechar]").forEach((b) => b.addEventListener("click", () => dlg.close()));
+  const temMembros = (g, i) => !!(g.membros && g.membros[i] && g.membros[i].length);
+  function rotuloLinha(g, i) {
+    if (g.tipo === "histograma") return `${fmt(g.bordas[i], g.casas)} – ${fmt(g.bordas[i + 1], g.casas)} ${g.unidade}`;
+    if (g.tipo === "colunas") return g.dicas[i];
+    if (g.tipo === "linhas") return "Run " + g.x[i];
+    return g.itens[i].nome;
+  }
+  function abrir(chave, i) {
+    const g = G[chave];
+    if (!temMembros(g, i)) return;
+    esconder();
+    const m = g.membros[i], n = new Set(m.map((r) => r[0])).size;
+    const fig = document.querySelector(`.grafico[data-g="${chave}"]`).closest(".grafico-bloco");
+    document.getElementById("membros-titulo").textContent = fig.dataset.titulo;
+    const faixa = document.getElementById("membros-faixa");
+    faixa.textContent = rotuloLinha(g, i);
+    faixa.classList.toggle("mono", g.tipo === "histograma" || g.tipo === "colunas");
+    const contados = g.tipo === "barras" ? g.itens[i].valor : g.tipo === "histograma" ? g.series[0].contagens[i] : m.length;
+    const oque = g.tipo === "barras" ? g.unidade : T("values");
+    document.getElementById("membros-contagem").textContent = contados !== n
+      ? T(n === 1 ? "{v} {what} in 1 sample" : "{v} {what} in {n} samples", { v: contados, what: oque, n })
+      : (n === 1 ? T("1 sample") : T("{n} samples", { n }));
+    const corpo = document.getElementById("membros-linhas");
+    corpo.textContent = "";
+    for (const [id, detalhe] of m) {
+      const [run, pid, data, st] = AM[id] || ["", "", "", ""];
+      const url = dlg.dataset.url + id;
+      const tr = document.createElement("tr");
+      const td = (txt, cls) => { const c = document.createElement("td"); if (cls) c.className = cls; c.textContent = txt || "–"; tr.appendChild(c); return c; };
+      const cRun = td("", "id");
+      const a = document.createElement("a"); a.href = url; a.textContent = run || "–"; cRun.textContent = ""; cRun.appendChild(a);
+      td(pid, "mono"); td(data, "mono");
+      const cSt = td(""); cSt.textContent = "";
+      const pill = document.createElement("span"); pill.className = "pill st-" + st.toLowerCase().replace(/ /g, "-"); pill.textContent = st;
+      cSt.appendChild(pill);
+      td(detalhe, "mono");
+      tr.addEventListener("click", (ev) => { if (!ev.target.closest("a")) location.href = url; });
+      corpo.appendChild(tr);
+    }
+    dlg.showModal();
+  }
+  // linhas das tabelas: clique ou Enter
+  document.querySelectorAll(".grafico-bloco").forEach((fig) => {
+    const div = fig.querySelector(".grafico[data-g]");
+    if (!div) return;
+    fig.querySelectorAll(".ver-tabela tr[data-linha]").forEach((tr) => {
+      const i = +tr.dataset.linha;
+      tr.addEventListener("click", () => abrir(div.dataset.g, i));
+      tr.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); abrir(div.dataset.g, i); } });
+    });
+  });
+
   // hover e foco de uma marca (barra ou faixa): a área sensível é a faixa inteira, não só a parte pintada
-  function sensivel(svg, alvo, marca, conteudo) {
+  function sensivel(svg, alvo, marca, conteudo, abre) {
     alvo.setAttribute("tabindex", "0");
+    if (abre) {
+      alvo.classList.add("clicavel");
+      alvo.addEventListener("click", abre);
+      alvo.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); abre(); } });
+    }
     const liga = (x, y) => { marca.classList.add("realce"); mostrar(x, y, ...conteudo()); };
     const desliga = () => { marca.classList.remove("realce"); esconder(); };
     alvo.addEventListener("pointermove", (ev) => liga(ev.clientX + window.scrollX, ev.clientY + window.scrollY));
@@ -76,6 +138,8 @@
     });
     alvo.addEventListener("blur", desliga);
   }
+
+  const abreSe = (div, g, i) => temMembros(g, i) ? () => abrir(div.dataset.g, i) : null;
 
   // barra com o canto de cima arredondado (4px) e a base reta, crescendo da linha de base
   function colunaPath(x, y, w, h) {
@@ -107,7 +171,7 @@
       const x0 = M.l + i * banda;
       const marca = v ? el("path", { d: colunaPath(x0 + (banda - larg) / 2, y(v), larg, y(0) - y(v)), class: "marca", style: `fill:${cor(1)}` }, svg) : el("g", {}, svg);
       const alvo = el("rect", { x: x0, y: M.t, width: banda, height: H - M.t - M.b, class: "alvo" }, svg);
-      sensivel(svg, alvo, marca, () => [g.dicas[i], [{ valor: String(v), nome: v === 1 ? T("sample") : T("samples") }]]);
+      sensivel(svg, alvo, marca, () => [g.dicas[i], [{ valor: String(v), nome: v === 1 ? T("sample") : T("samples") }]], abreSe(div, g, i));
       if (i % pulo === 0) texto(svg, x0 + banda / 2, H - M.b + 16, g.rotulos[i], { class: "eixo", "text-anchor": "middle" });
     });
     el("line", { x1: M.l, x2: W - M.r, y1: y(0), y2: y(0), class: "base" }, svg);
@@ -128,7 +192,7 @@
       const marca = c ? el("path", { d: colunaPath(x0 + 1, y(c), Math.max(1, w - 2), y(0) - y(c)), class: "marca", style: `fill:${cor(s.cor)}` }, svg) : el("g", {}, svg);
       const alvo = el("rect", { x: x0, y: M.t, width: w, height: H - M.t - M.b, class: "alvo" }, svg);
       sensivel(svg, alvo, marca, () => [`${fmt(b[i], g.casas)} – ${fmt(b[i + 1], g.casas)} ${g.unidade}`,
-        [{ valor: String(c), nome: s.nome }]]);
+        [{ valor: String(c), nome: s.nome }]], abreSe(div, g, i));
     });
     b.forEach((v, i) => {
       if (i % pulo === 0) texto(svg, x(v), H - M.b + 16, fmt(v, casasEixo), { class: "eixo", "text-anchor": "middle" });
@@ -187,10 +251,18 @@
     const cruz = el("line", { y1: M.t, y2: H - M.b, class: "cruz", visibility: "hidden" }, svg);
     const pontos = g.series.map((s) => el("circle", { r: 4, class: "ponto", visibility: "hidden", style: `fill:${cor(s.cor)}` }, svg));
     const alvo = el("rect", { x: M.l - 6, y: M.t, width: W - M.l - MR + 12, height: H - M.t - M.b, class: "alvo" }, svg);
-    alvo.addEventListener("pointermove", (ev) => {
+    const maisPerto = (ev) => {
       const px = ev.clientX - svg.getBoundingClientRect().left;
       let i = 0;
       xs.forEach((v, j) => { if (Math.abs(x(v) - px) < Math.abs(x(xs[i]) - px)) i = j; });
+      return i;
+    };
+    if (g.membros) {
+      alvo.classList.add("clicavel");
+      alvo.addEventListener("click", (ev) => abrir(div.dataset.g, maisPerto(ev)));
+    }
+    alvo.addEventListener("pointermove", (ev) => {
+      const i = maisPerto(ev);
       cruz.setAttribute("x1", x(xs[i])); cruz.setAttribute("x2", x(xs[i])); cruz.setAttribute("visibility", "visible");
       g.series.forEach((s, k) => {
         const v = s.valores[i];
@@ -223,7 +295,7 @@
       const marca = it.valor ? el("path", { d: barraPath(NOME, yb, Math.max(2, w(it.valor)), ESP), class: "marca", style: `fill:${cor(1)}` }, svg) : el("g", {}, svg);
       texto(svg, NOME + w(it.valor) + 6, y0 + ALT / 2 + 4, rotulo(it.valor), { class: "valor" });
       const alvo = el("rect", { x: 0, y: y0, width: W, height: ALT, class: "alvo" }, svg);
-      sensivel(svg, alvo, marca, () => [it.nome, [{ valor: rotulo(it.valor), nome: g.unidade }]]);
+      sensivel(svg, alvo, marca, () => [it.nome, [{ valor: rotulo(it.valor), nome: g.unidade }]], abreSe(div, g, i));
     });
     el("line", { x1: NOME, x2: NOME, y1: 2, y2: H - 2, class: "base" }, svg);
   }
