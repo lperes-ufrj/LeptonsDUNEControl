@@ -75,6 +75,11 @@ def inicializar_banco():
             comprimento_mm TEXT, largura_mm TEXT, massa_antes TEXT, massa_depois TEXT, area_cm2 TEXT,
             densidade_ug_cm2 TEXT, eficiencia TEXT, aprovado TEXT);
         CREATE TABLE IF NOT EXISTS config_sistema (chave TEXT PRIMARY KEY, valor TEXT);
+        -- só do app do navegador: filtros retirados na inspeção visual (descarte / limpeza / reuso), ver retirados.py
+        CREATE TABLE IF NOT EXISTS filtro_retirado (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, id_tarefa INTEGER, filtro INTEGER, classe TEXT, destino TEXT,
+            observacao TEXT, data_hora TEXT, usuario TEXT, origem_pid TEXT, origem_run TEXT,
+            limpeza_id INTEGER, codigo_limpeza TEXT, usado_tarefa_id INTEGER, usado_filtro INTEGER);
     """)
     # migração para bancos já existentes
     for coluna in ("codigo_lote", "eficiencia_optica_ok", "valor_eficiencia", "imersao_criogenica_ok",
@@ -102,7 +107,8 @@ INDICES = {
     "rastreabilidade.db": [("massa_posicoes", "id_tarefa"), ("inspecao_visual_cab", "id_tarefa"),
                            ("inspecao_visual_filtros", "id_tarefa"), ("imersao_massas", "id_tarefa"),
                            ("imersao_itens", "id_tarefa"), ("tarefa_lotes", "id_tarefa"),
-                           ("filtro_origem", "id_tarefa"), ("eficiencia_teste", "id_tarefa"), ("eficiencia_amostras", "id_tarefa")],
+                           ("filtro_origem", "id_tarefa"), ("eficiencia_teste", "id_tarefa"), ("eficiencia_amostras", "id_tarefa"),
+                           ("filtro_retirado", "id_tarefa"), ("filtro_retirado", "limpeza_id"), ("filtro_retirado", "usado_tarefa_id")],
     "lotes.db": [("lotes_internos", "id_lote")],
 }
 

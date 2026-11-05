@@ -2,6 +2,7 @@
 
 Só lê os bancos, com as mesmas regras das outras telas (dados.py). Os histogramas já saem daqui com as faixas
 contadas; o estatisticas.js só desenha. Cada gráfico leva também a sua tabela (para ver os números sem o mouse).
+A seção Removed filters · Cleaning lots usa filtro_retirado (retirados.py) e a origem de cada posição.
 A janela Export CSV gera os mesmos números em CSV (em inglês, como os relatórios): um arquivo ou um .zip.
 Cada linha das tabelas (e cada barra) leva também os seus "membros": as samples que ela conta, [id, detalhe], que a
 página mostra numa janela ao clicar.
@@ -13,7 +14,7 @@ import statistics
 import zipfile
 from datetime import date, datetime, timedelta
 
-from . import chegada, dados, lotes
+from . import chegada, dados, lotes, retirados
 from .i18n import t
 
 COR_POSICAO = {2: 1, 3: 2, 14: 3}          # posição -> cor da série (1, 2, 3 = azul, laranja, verde-água)
@@ -110,8 +111,9 @@ def _semana(d):
     return d - timedelta(days=d.weekday())
 
 
-def por_periodo(datas, refs=()):
-    """Samples depositadas por semana (até ~6 meses) ou por mês, com os períodos vazios no meio; refs = ids, na ordem."""
+def por_periodo(datas, refs=(), conta="Samples"):
+    """Samples depositadas (ou outra coisa, ex.: filtros retirados) por semana (até ~6 meses) ou por mês, com os períodos
+    vazios no meio; refs = ids das samples, na ordem; conta = o que é contado (cabeçalho da tabela e do CSV)."""
     if not datas:
         return None
     lo, hi = min(datas), max(datas)
@@ -133,9 +135,10 @@ def por_periodo(datas, refs=()):
     nomes = [rotulo(p) for p in periodos]
     valores = [contagem.get(p, 0) for p in periodos]
     titulo = t("month") if mensal else t("week of")
-    return {"tipo": "colunas", "rotulos": nomes, "valores": valores, "mensal": mensal,
+    return {"tipo": "colunas", "rotulos": nomes, "valores": valores, "mensal": mensal, "conta": conta,
+            "unidades": [t("sample"), t("samples")] if conta == "Samples" else [t("filter"), t("filters")],
             "dicas": [(p.strftime("%Y-%m") if mensal else t("week of {d}", d=p.isoformat())) for p in periodos],
-            "tabela": {"cab": [titulo, t("Samples")],
+            "tabela": {"cab": [titulo, t(conta)],
                        "linhas": [[p.strftime("%Y-%m") if mensal else p.isoformat(), v] for p, v in zip(periodos, valores)]},
             "membros": [membros.get(p, []) for p in periodos]}
 
@@ -173,11 +176,25 @@ def _variacao_imersao(r):
     return (d - a) * 100 / a if a and d is not None else None
 
 
+def _origem_posicoes(d, gravada):
+    """{posição: (tipo, código do lote interno)}: o único lote vale para todas; com vários, o que a janela gravou."""
+    if len(d["lotes"]) == 1:
+        l = d["lotes"][0]
+        return {n: (l["tipo"], l["interno"]) for n in range(1, dados.N_FILTROS + 1)}
+    return dict(gravada) if d["lotes"] else {}
+
+
 def ler_amostras():
     """Todas as samples, já com os estados calculados (as mesmas regras da lista)."""
     conn = dados._conectar(dados.DB_TAREFAS)
     try:
         lotes_ = dados._lotes_por_tarefa(conn)
+        internos, limpezas = dados.codigos_lotes_internos()
+        origem = {}                  # {id: {posição: (tipo, código do lote interno)}} da janela Filter origin
+        for r in conn.execute("SELECT id_tarefa, filtro, tipo_lote, lote_interno_id, codigo_lote_interno FROM filtro_origem"):
+            tipo = r["tipo_lote"] or "opto"
+            codigo = (limpezas if tipo == "limpeza" else internos).get(r["lote_interno_id"]) or r["codigo_lote_interno"] or ""
+            origem.setdefault(r["id_tarefa"], {})[r["filtro"]] = (tipo, codigo)
         saida = []
         for linha in conn.execute("SELECT * FROM tarefas"):
             d = dados._dados_tarefa(conn, dict(linha), lotes_.get(linha["id"], []))
@@ -186,6 +203,7 @@ def ler_amostras():
             d["decisao"] = dados.decisao_lote(d["estado_imersao"], d["estado_eficiencia"])
             d["numero"] = dados.numero_run(d["cab"].get("run_evaporation"))
             d["data"] = _data(d["tarefa"].get("data_inicio"))
+            d["posicoes"] = _origem_posicoes(d, origem.get(d["id"], {}))
             saida.append(d)
         return saida
     finally:
@@ -298,11 +316,11 @@ def calcular(de=None, ate=None, lote=""):
     lotes_reg = [l for l in chegada.listar() if not lote or l.get("lote_geral") == lote]
     recebidos = sum(int(x) for l in lotes_reg if str(x := l.get("total_filtros") or "").isdigit())
 
+    limpeza = _secao_limpeza(todas, sel)
+
     lim = dados.LIMITE_PERDA_PCT
-    return {
-        "sel": sel, "optos": optos,
-        "amostras": {d["id"]: [d["numero"] or "", d["tarefa"].get("codigo_tarefa") or "", d["tarefa"].get("data_inicio") or "",
-                               d["status"]] for d in sel}, "n_total": len(todas), "n": len(sel), "sem_data": sem_data,
+    e = {
+        "sel": sel, "optos": optos, "limpeza": limpeza["numeros"], "n_total": len(todas), "n": len(sel), "sem_data": sem_data,
         "status": {s: sum(1 for d in sel if d["status"] == s) for s in dados.STATUS_TODOS},
         "decisao": {k: sum(1 for d in sel if d["decisao"] == k) for k in ("Approved", "Rejected", "Pending")},
         "filtros_dep": len(sel) * dados.N_FILTROS, "filtros_rec": recebidos, "n_lotes": len(lotes_reg),
@@ -330,8 +348,113 @@ def calcular(de=None, ate=None, lote=""):
                                      n_alvo=10, refs=refs_efs),
             "dens_ef": histograma([(t("Witness sample density"), 1, dens_ef)], "µg/cm²", 1, n_alvo=10, refs=refs_dens_ef),
             "internos": barras(sorted(por_interno.items(), key=lambda kv: -kv[1]), t("samples"), membros=membros_internos),
+            **limpeza["graficos"],
         },
     }
+    # samples citadas nas janelas (as da seleção e as de origem dos filtros limpos): [run, PID, data, status]
+    citadas = {i for g in e["graficos"].values() if g for linha in g.get("membros") or [] for i, _ in linha}
+    citadas |= {d["id"] for d in sel}
+    e["amostras"] = {d["id"]: [d["numero"] or "", d["tarefa"].get("codigo_tarefa") or "", d["tarefa"].get("data_inicio") or "",
+                               d["status"]] for d in todas if d["id"] in citadas}
+    return e
+
+
+# ---------------- filtros retirados e cleaning lots ----------------
+SITUACOES = (("descartado", "Discarded"), ("aguardando", "Waiting for cleaning"),
+             ("no_lote", "In a cleaning lot, not used yet"), ("reusado", "Reused in a new sample"))
+ORIGENS = (("opto", "OPTO internal lots"), ("limpeza", "Leptons cleaning lots"),
+           (None, "Several batches, slot not assigned"), ("sem", "No batch recorded"))
+
+
+def _membros(grupos, ordem):
+    """{barra: {id: [nº dos filtros]}} -> {barra: [[id, 'filters 1–3']]} na ordem das samples."""
+    pos = {i: k for k, i in enumerate(ordem)}
+    return {b: [[i, retirados_txt(ns)] for i, ns in sorted(por.items(), key=lambda kv: pos.get(kv[0], 1e9))]
+            for b, por in grupos.items()}
+
+
+def retirados_txt(ns):
+    return t("filter {n}", n=ns[0]) if len(ns) == 1 else t("filters {lista}", lista=lotes.faixas(ns))
+
+
+def _secao_limpeza(todas, sel):
+    """Números e gráficos da seção Removed filters · Cleaning lots.
+
+    Retiradas, destino e origem das posições: das samples da seleção. Cleaning lots: todos (o estoque de hoje)."""
+    ids_sel = {d["id"] for d in sel}
+    ordem = [d["id"] for d in sel] + [d["id"] for d in todas if d["id"] not in ids_sel]
+    todas_ret = retirados._listar()
+    rem = [r for r in todas_ret if r["id_tarefa"] in ids_sel]
+    chave_rem = {(r["id_tarefa"], r["filtro"]) for r in rem}
+
+    # filtros A / B: retirados ou ainda na sample
+    por_classe = {}
+    for d in sel:
+        for n, f in sorted(d["filtros"].items()):
+            c = f.get("classification")
+            if c in retirados.CLASSES_RETIRAVEIS:
+                barra = f"{c} → " + (t("removed") if (d["id"], n) in chave_rem else t("still in the sample"))
+                por_classe.setdefault(barra, {}).setdefault(d["id"], []).append(n)
+    barras_classe = [f"{c} → {t(x)}" for c in retirados.CLASSES_RETIRAVEIS for x in ("removed", "still in the sample")]
+    n_ab = sum(len(ns) for por in por_classe.values() for ns in por.values())
+
+    # destino dos retirados
+    por_destino = {}
+    for r in rem:
+        por_destino.setdefault(t(dict(SITUACOES)[r["situacao"]]), {}).setdefault(r["id_tarefa"], []).append(r["filtro"])
+    situacoes = {s: sum(1 for r in rem if r["situacao"] == s) for s, _ in SITUACOES}
+
+    # de onde veio cada posição depositada
+    por_origem = {}
+    nome_origem = {tipo: t(nome) for tipo, nome in ORIGENS}
+    for d in sel:
+        for n in range(1, dados.N_FILTROS + 1):
+            tipo = (d["posicoes"].get(n) or (None,))[0] if d["lotes"] else "sem"
+            nome = nome_origem.get(tipo, nome_origem[None])
+            por_origem.setdefault(nome, {}).setdefault(d["id"], []).append(n)
+    n_limpeza = sum(len(ns) for ns in por_origem.get(nome_origem["limpeza"], {}).values())
+    rastreados = sum(1 for r in todas_ret if r["usado_tarefa_id"] in ids_sel)
+
+    # cleaning lots (todos): posições usadas em samples, tamanho do lote, filtros retirados controlados
+    usados_lote = {}
+    for d in todas:
+        for n, (tipo, cod) in d["posicoes"].items():
+            if tipo == "limpeza":
+                usados_lote.setdefault(cod, {}).setdefault(d["id"], []).append(n)
+    controlados = retirados.por_limpeza()
+    itens_lote, linhas_lote = [], []
+    for l in sorted(lotes.limpezas(), key=lambda l: l["codigo"] or ""):
+        cod = l["codigo"] or "?"
+        usados = sum(len(ns) for ns in usados_lote.get(cod, {}).values())
+        tamanho = lotes.inteiro(l["filtros"])
+        ctl = controlados.get(l["id"], [])
+        itens_lote.append((cod, usados))
+        linhas_lote.append([cod, usados, "" if tamanho is None else tamanho,
+                            "" if tamanho is None else tamanho - usados, len(ctl),          # negativo: usaram mais do que o lote tinha
+                            sum(1 for r in ctl if r["situacao"] == "no_lote")])
+    g_lotes = None
+    if itens_lote:
+        g_lotes = barras(itens_lote, t("filters used"), membros=_membros(usados_lote, ordem))
+        g_lotes["tabela"] = {"cab": ["", t("used in samples"), t("filters in the lot"), t("left"), t("removed filters recorded"),
+                                     t("recorded, not used yet")], "linhas": linhas_lote}
+
+    graficos = {
+        "retirada_classe": barras([(b, sum(len(ns) for ns in por_classe.get(b, {}).values())) for b in barras_classe],
+                                  t("filters"), total=n_ab, membros=_membros(por_classe, ordem)) if n_ab else None,
+        "destino": barras([(t(nome), situacoes[s]) for s, nome in SITUACOES], t("filters"), total=len(rem),
+                          membros=_membros(por_destino, ordem)) if rem else None,
+        "retirados_periodo": por_periodo([_data(r["data_hora"]) for r in rem if _data(r["data_hora"])],
+                                         [r["id_tarefa"] for r in rem if _data(r["data_hora"])], "Filters removed"),
+        "origem_filtros": barras([(nome_origem[tipo], sum(len(ns) for ns in por_origem.get(nome_origem[tipo], {}).values()))
+                                  for tipo, _ in ORIGENS], t("filters"), total=len(sel) * dados.N_FILTROS,
+                                 membros=_membros(por_origem, ordem)) if sel else None,
+        "lotes_limpeza": g_lotes,
+    }
+    aguardando = sum(1 for r in todas_ret if r["situacao"] == "aguardando")
+    disponiveis = sum(1 for r in todas_ret if r["situacao"] == "no_lote")
+    return {"graficos": graficos, "numeros": {
+        "removidos": len(rem), "n_ab": n_ab, "situacoes": situacoes, "n_limpeza": n_limpeza, "rastreados": rastreados,
+        "aguardando": aguardando, "disponiveis": disponiveis, "n_lotes": len(itens_lote)}}
 
 
 # =====================================================================
@@ -354,6 +477,11 @@ ITENS_CSV = [
     ("Cryogenic immersion · Optical efficiency", "imersao", "immersion_mass_change", "Mass change after immersion – histogram"),
     ("Cryogenic immersion · Optical efficiency", "eficiencia", "relative_efficiency", "Relative efficiency – histogram"),
     ("Cryogenic immersion · Optical efficiency", "dens_ef", "witness_sample_density", "Witness sample density – histogram"),
+    ("Removed filters · Cleaning lots", "retirada_classe", "filters_a_b_removed", "Filters classified A or B – removed or still in the sample"),
+    ("Removed filters · Cleaning lots", "destino", "removed_filters_destination", "Removed filters – destination"),
+    ("Removed filters · Cleaning lots", "retirados_periodo", "filters_removed_per_period", "Filters removed per week / month"),
+    ("Removed filters · Cleaning lots", "origem_filtros", "deposited_filters_origin", "Deposited filters – origin (OPTO / cleaning lots)"),
+    ("Removed filters · Cleaning lots", "lotes_limpeza", "cleaning_lots_usage", "Cleaning lots – filters used, left and recorded"),
 ]
 CHAVES_CSV = [i[1] for i in ITENS_CSV]
 
@@ -431,7 +559,7 @@ def tabela_csv(e, chave):
         return ([f"From ({g['unidade']})", f"To ({g['unidade']})"] + [s["nome"] for s in g["series"]],
                 [[_num(b[i], 6), _num(b[i + 1], 6)] + [s["contagens"][i] for s in g["series"]] for i in range(len(b) - 1)])
     if g["tipo"] == "colunas":
-        return ["Month" if g["mensal"] else "Week of", "Samples"], g["tabela"]["linhas"]
+        return ["Month" if g["mensal"] else "Week of", g.get("conta", "Samples")], g["tabela"]["linhas"]
     if g["tipo"] == "linhas":
         return (["Run"] + [f"{s['nome']} ({g['unidade']})" for s in g["series"]],
                 [[x] + [_num(s["valores"][i], 2) for s in g["series"]] for i, x in enumerate(g["x"])])

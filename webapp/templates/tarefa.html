@@ -108,8 +108,9 @@
   </div>
 </details>
 
-<details class="cartao" {{ 'open' if d.visual[2] }}>
+<details class="cartao" id="visual" {{ 'open' if d.visual[2] or retirados_amostra }}>
   <summary>Visual inspection <span class="pill es-{{ 'approved' if completos == N_FILTROS else 'partial' if d.visual[2] else 'empty' }}">{{ completos }}/{{ N_FILTROS }} {{ _("classified") }}</span>
+    {% if retirados_amostra %}<span class="pill es-rejected">{{ _("{n} removed", n=retirados_amostra|length) }}</span>{% endif %}
     <span class="direita suave pequeno">{{ quem_quando(c.data_inspecao, c.operador) }}</span></summary>
   <div class="dentro">
     <dl class="chaves" style="margin-bottom: 14px">
@@ -119,19 +120,40 @@
       <dt>{{ _("Supervisor review") }}</dt><dd>{{ c.supervisor|ou_traco }}{% if c.data_revisao %} · {{ c.data_revisao }}{% endif %}</dd>
       {% if c.notes %}<dt>{{ _("Notes") }}</dt><dd class="largo texto">{{ c.notes }}</dd>{% endif %}
     </dl>
-    <table>
+    <div class="rolagem"><table>
       <thead><tr><th class="centro">{{ _("Filter") }}</th>{% for _col, titulo in dados.COLUNAS_INSPECAO %}<th class="centro">{{ titulo }}</th>{% endfor %}
-        <th>{{ _("Comments") }}</th><th class="centro">{{ _("Class") }}</th></tr></thead>
+        <th>{{ _("Comments") }}</th><th class="centro">{{ _("Class") }}</th>
+        <th title="{{ _('Filters classified A or B can be removed: discarded, or sent to cleaning and reused in a new sample') }}">{{ _("Removal") }}</th></tr></thead>
       <tbody>
       {% for n in range(1, N_FILTROS + 1) %}
         {% set f = d.filtros.get(n, {}) %}
-        <tr><td class="centro mono">{{ n }}</td>
+        {% set r = retirados_amostra.get(n) %}
+        {% set u = reusados.get(n) %}
+        <tr class="{{ 'retirado' if r }}"><td class="centro mono">{{ n }}
+            {% if u %}<a class="reuso" href="{{ url_for('tarefa', tarefa_id=u.id_tarefa) if u.existe else url_for('limpeza_pagina') }}"
+               title="{{ _('Cleaned filter from cleaning lot {codigo}', codigo=u.codigo_limpeza or '?') }}">♻ Run {{ u.run or '–' }} · {{ u.filtro }}</a>{% endif %}</td>
           {% for col, _titulo in dados.COLUNAS_INSPECAO %}<td class="centro">{{ f[col]|ou_traco }}</td>{% endfor %}
           <td class="pequeno">{{ f.comments or '' }}</td>
-          <td class="centro classe-{{ f.classification }}">{{ f.classification|ou_traco }}</td></tr>
+          <td class="centro classe-{{ f.classification }}">{{ f.classification|ou_traco }}</td>
+          <td class="retirada">
+            {%- if r %}
+              {%- if r.situacao == 'descartado' %}<span class="pill es-rejected">{{ _("Discarded") }}</span>
+              {%- elif r.situacao == 'aguardando' %}<a class="pill es-partial" href="{{ url_for('limpeza_pagina') }}">{{ _("Waiting for cleaning") }}</a>
+              {%- elif r.situacao == 'no_lote' %}<a class="pill es-empty" href="{{ url_for('limpeza_pagina', edit=r.limpeza_id) }}">{{ _("Cleaned · {codigo}", codigo=r.codigo_limpeza or '?') }}</a>
+              {%- else %}<a class="pill es-approved" href="{{ url_for('tarefa', tarefa_id=r.usado_tarefa_id) }}">{{ _("Reused in Run {run} · filter {n}", run=r.usado_run or '–', n=r.usado_filtro) }}</a>{% endif %}
+              <span class="info-retirada" title="{{ _('Removed') }} {{ r.data_hora }}{% if r.usuario %} · {{ r.usuario }}{% endif %}{% if r.observacao %} – {{ r.observacao }}{% endif %}">ⓘ</span>
+              {%- if r.situacao in ('descartado', 'aguardando') %}
+              <form method="post" action="{{ url_for('desfazer_retirada', retirado_id=r.id) }}" class="em-linha"
+                    onsubmit='return confirm({{ _("Put filter {n} back in this sample?", n=n)|tojson }})'>
+                <button class="botao mini-botao" title="{{ _('Put the filter back in its sample (it was removed by mistake)') }}">{{ _("Put back") }}</button></form>
+              {%- endif %}
+            {%- elif f.classification in classes_retiraveis %}
+              <button type="button" class="botao mini-botao" data-retirar="{{ url_for('retirar_filtro', tarefa_id=d.id, filtro=n) }}"
+                      data-filtro="{{ n }}" data-classe="{{ f.classification }}">{{ _("Remove…") }}</button>
+            {%- endif %}</td></tr>
       {% endfor %}
       </tbody>
-    </table>
+    </table></div>
   </div>
 </details>
 
@@ -203,6 +225,39 @@
     </table>
   </div>
 </details>
+
+{# janela: retirar um filtro (classe A ou B) – descarte ou limpeza #}
+<dialog id="dlg-retirar" class="dialogo pequeno">
+  <form method="post" id="form-retirar">
+    <div class="dialogo-topo"><h2 id="rt-titulo"></h2><button type="button" class="x" data-fechar>✕</button></div>
+    <div class="dialogo-corpo">
+      <p class="nota">{{ _("The filter leaves this sample: its slot stays empty, and its inspection stays recorded. The Final QA sign-off is not changed; the removal goes to the audit log.") }}</p>
+      <div class="opcoes-retirar">
+        <label class="marcar"><input type="radio" name="destino" value="Cleaning" checked>
+          <span><b>{{ _("Send to cleaning") }}</b><br><small class="suave">{{ _("Goes to the waiting list of the Cleaning lots tab; after cleaning it can be used in a new sample.") }}</small></span></label>
+        <label class="marcar"><input type="radio" name="destino" value="Discarded">
+          <span><b>{{ _("Discard") }}</b><br><small class="suave">{{ _("The filter is thrown away.") }}</small></span></label>
+      </div>
+      <label class="bloco-texto">{{ _("Note (optional)") }}<input name="obs" maxlength="300"></label>
+    </div>
+    <div class="dialogo-rodape">
+      <button type="button" class="botao" data-fechar>{{ _("Cancel") }}</button>
+      <button class="botao primario">{{ _("Remove filter") }}</button>
+    </div>
+  </form>
+</dialog>
+<script>
+  (function () {
+    const dlg = document.getElementById("dlg-retirar"), form = document.getElementById("form-retirar");
+    document.querySelectorAll("[data-retirar]").forEach((b) => b.addEventListener("click", () => {
+      form.action = b.dataset.retirar;
+      form.reset();
+      document.getElementById("rt-titulo").textContent = T("Remove filter {n} (class {c})", { n: b.dataset.filtro, c: b.dataset.classe });
+      dlg.showModal();
+    }));
+    dlg.querySelectorAll("[data-fechar]").forEach((b) => b.addEventListener("click", () => dlg.close()));
+  })();
+</script>
 
 <details class="cartao" open>
   <summary>Final QA sign-off <span class="pill grande st-{{ d.status|lower|replace(' ', '-') }}">{{ d.status }}</span></summary>

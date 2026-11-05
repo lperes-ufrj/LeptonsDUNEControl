@@ -41,16 +41,36 @@ Browser app (branch browser-app)
   Export CSV, and the Leptons cleaning lots (DUNE-LP-000X) with their PDF list. Each batch page lists the samples
   deposited from each box. Same audit codes (BATCH_CREATE/UPDATE/DELETE, CLEANING_LOT_SAVE/DELETE). Uploaded
   supplier files are copied to the "arquivos_lotes" folder.
-- The Statistics tab (next to Batches) shows the process numbers and histograms, read from the same .db files:
+- The Statistics tab (next to Cleaning lots) shows the process numbers and histograms, read from the same .db files:
   samples per week/month, status and batch decision, mass density at each position (Center/Middle/External) and per
   run, radial uniformity (External ÷ Center), visual classification and defects, mass change after cryogenic
-  immersion, relative optical efficiency (with the 0.75 limit) and the samples per internal lot. Filter by period
+  immersion, relative optical efficiency (with the 0.75 limit) and the samples per internal lot. The section
+  "Removed filters · Cleaning lots" shows the filters classified A or B (removed or still in the sample), the
+  destination of the removed ones (discarded / waiting / in a cleaning lot / reused), removals per week, where the
+  deposited filters came from (OPTO internal lots / Leptons cleaning lots) and, for every cleaning lot, the filters
+  used in samples, the lot size and the filters left (negative = more used than the lot had). Filter by period
   (presets or From/To on the deposition date) and by OPTO batch; every chart has a "Table" with its numbers.
   Clicking a table row (or a bar, or a run on the per-run chart) opens a window with the samples it counts – run, PID,
   date, status and the value (or the filter numbers, for the visual inspection) – and clicking a sample opens it.
   "Export CSV…" (next to Apply) opens a window to choose exactly what to export for that same selection: the
   summary, descriptive statistics, one row per sample, and each chart's numbers. Several items come as a .zip with one
   CSV each (plus 00_selection.csv) or as one CSV with a section per item. The CSV files are always in English.
+- Projections tab (Admins only): when each stage reaches the 2000 samples to deliver – Deposition (masses measured at
+  the three positions), Visual inspection (all 28 filters classified), Cryogenic immersion and Optical efficiency
+  (result Approved or Rejected), each by its own date. The projection considers each stage's samples from the 10th
+  on: the pace is the slope of a least-squares line through their cumulative count by date (the first 9, the slower
+  start, are left out), extended from the last sample to 2000; the table
+  also gives the date at the pace of the last 8 weeks. Target and minimum are META / MINIMO in webapp/projecoes.py.
+- Removed filters and cleaning (Cleaning lots tab, between Batches and Statistics): on the sample page, Visual inspection,
+  a filter classified A or B has a "Remove…" button – Discard, or Send to cleaning. Its slot in that sample stays empty
+  (the inspection stays recorded, the Final QA sign-off is not changed, the removal goes to the audit log as
+  FILTER_DISCARD / FILTER_TO_CLEANING, with the note; Put back as FILTER_REMOVE_UNDO). Filters sent to cleaning wait on the Cleaning lots tab; a cleaning lot (DUNE-LP-000X)
+  is made by ticking the waiting filters it contains (number of filters and origin fill in). In the sample form, after
+  adding the cleaning lot (Add batch / internal lot… › Leptons cleaning lot), "Cleaned filters…" says which cleaned filter
+  is in each slot (audit FILTER_REUSE: slot <- filter and lot, or slot released); the original sample then shows
+  where its filter went. CLEANING_LOT_SAVE lists the filters added to the lot or sent back to waiting, and TASK_DELETE
+  says how many cleaned filters became free again. "Put back" undoes a removal while the filter is
+  not in a cleaning lot yet. Stored in the filtro_retirado table (rastreabilidade.db), which the desktop programs ignore.
 - When a sample uses more than one box or batch, the sample form shows a "Filter origin…" button: a window to say
   which of the 28 filters came from which box/batch (type a range, e.g. 1–20 → box A, or pick each filter). The sample
   page, the HTML report and the PDF show the ranges per box. Stored in the filtro_origem table (rastreabilidade.db);

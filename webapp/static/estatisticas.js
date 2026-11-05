@@ -86,7 +86,7 @@
     faixa.textContent = rotuloLinha(g, i);
     faixa.classList.toggle("mono", g.tipo === "histograma" || g.tipo === "colunas");
     const contados = g.tipo === "barras" ? g.itens[i].valor : g.tipo === "histograma" ? g.series[0].contagens[i] : m.length;
-    const oque = g.tipo === "barras" ? g.unidade : T("values");
+    const oque = g.tipo === "barras" ? g.unidade : g.unidades ? g.unidades[1] : T("values");
     document.getElementById("membros-contagem").textContent = contados !== n
       ? T(n === 1 ? "{v} {what} in 1 sample" : "{v} {what} in {n} samples", { v: contados, what: oque, n })
       : (n === 1 ? T("1 sample") : T("{n} samples", { n }));
@@ -171,7 +171,8 @@
       const x0 = M.l + i * banda;
       const marca = v ? el("path", { d: colunaPath(x0 + (banda - larg) / 2, y(v), larg, y(0) - y(v)), class: "marca", style: `fill:${cor(1)}` }, svg) : el("g", {}, svg);
       const alvo = el("rect", { x: x0, y: M.t, width: banda, height: H - M.t - M.b, class: "alvo" }, svg);
-      sensivel(svg, alvo, marca, () => [g.dicas[i], [{ valor: String(v), nome: v === 1 ? T("sample") : T("samples") }]], abreSe(div, g, i));
+      const u = g.unidades || [T("sample"), T("samples")];
+      sensivel(svg, alvo, marca, () => [g.dicas[i], [{ valor: String(v), nome: v === 1 ? u[0] : u[1] }]], abreSe(div, g, i));
       if (i % pulo === 0) texto(svg, x0 + banda / 2, H - M.b + 16, g.rotulos[i], { class: "eixo", "text-anchor": "middle" });
     });
     el("line", { x1: M.l, x2: W - M.r, y1: y(0), y2: y(0), class: "base" }, svg);
@@ -285,19 +286,30 @@
     const H = n * ALT + 8;
     div.style.height = H + "px";
     const svg = el("svg", { width: W, height: H }, div);
-    const NOME = Math.min(150, W * 0.36), VAL = 84;
+    // coluna dos nomes do tamanho do maior nome (medido), até 45% da largura; o que não couber ganha "…"
+    const medir = el("text", { class: "eixo-nome", x: 0, y: -10 }, svg);
+    const larg = (s) => { medir.textContent = s; return medir.getComputedTextLength(); };
+    const NOME = Math.max(60, Math.min(Math.max(...g.itens.map((i) => larg(i.nome))) + 16, W * 0.45)), VAL = 84;
+    const caber = (s) => {
+      if (larg(s) <= NOME - 14) return s;
+      let c = s;
+      while (c.length > 1 && larg(c + "…") > NOME - 14) c = c.slice(0, -1);
+      return c + "…";
+    };
     const max = Math.max(1, ...g.itens.map((i) => i.valor));
     const w = (v) => v / max * (W - NOME - VAL);
     const rotulo = (v) => g.total ? `${v} (${(100 * v / g.total).toFixed(1)}%)` : String(v);
     g.itens.forEach((it, i) => {
       const y0 = 4 + i * ALT, yb = y0 + (ALT - ESP) / 2;
-      texto(svg, NOME - 10, y0 + ALT / 2 + 4, it.nome, { class: "eixo-nome", "text-anchor": "end" });
+      const nome = texto(svg, NOME - 10, y0 + ALT / 2 + 4, caber(it.nome), { class: "eixo-nome", "text-anchor": "end" });
+      if (nome.textContent !== it.nome) el("title", {}, nome).textContent = it.nome;
       const marca = it.valor ? el("path", { d: barraPath(NOME, yb, Math.max(2, w(it.valor)), ESP), class: "marca", style: `fill:${cor(1)}` }, svg) : el("g", {}, svg);
       texto(svg, NOME + w(it.valor) + 6, y0 + ALT / 2 + 4, rotulo(it.valor), { class: "valor" });
       const alvo = el("rect", { x: 0, y: y0, width: W, height: ALT, class: "alvo" }, svg);
       sensivel(svg, alvo, marca, () => [it.nome, [{ valor: rotulo(it.valor), nome: g.unidade }]], abreSe(div, g, i));
     });
     el("line", { x1: NOME, x2: NOME, y1: 2, y2: H - 2, class: "base" }, svg);
+    medir.remove();
   }
 
   const DESENHOS = { colunas, histograma, linhas, barras };

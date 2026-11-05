@@ -121,6 +121,37 @@
   </div>
 </div>
 
+{# filtros retirados (A/B), de onde vieram os filtros depositados e o uso dos cleaning lots #}
+{% set L = e.limpeza %}
+<div class="cartao estat-cartao">
+  <div class="linha-secao"><span>{{ _("Removed filters · Cleaning lots") }}</span>
+    <a class="direita pequeno" href="{{ url_for('limpeza_pagina') }}">{{ _("Cleaning lots tab") }} →</a></div>
+  <div class="resumo resumo-secao">
+    <div class="item"><div class="rot">{{ _("Filters removed") }}</div>
+      <div class="val grande">{{ L.removidos }}</div>
+      <div class="pequeno suave">{{ _("of {n} classified A or B", n=L.n_ab) }}</div></div>
+    <div class="item"><div class="rot">{{ _("Destination") }}</div>
+      <div class="val"><span class="pill es-rejected">{{ _("Discarded") }} {{ L.situacoes.descartado }}</span>
+        <span class="pill es-partial">{{ _("To cleaning") }} {{ L.removidos - L.situacoes.descartado }}</span></div>
+      <div class="pequeno suave">{{ _("{n} already reused in a new sample", n=L.situacoes.reusado) }}</div></div>
+    <div class="item"><div class="rot">{{ _("Filters from cleaning lots") }}</div>
+      <div class="val grande">{{ L.n_limpeza }}{% if e.filtros_dep %}<span class="pequeno suave"> · {{ "%.1f"|format(100 * L.n_limpeza / e.filtros_dep) }} %</span>{% endif %}</div>
+      <div class="pequeno suave">{{ _("of the {n} filters deposited · {k} traced to the removed filter", n=e.filtros_dep, k=L.rastreados) }}</div></div>
+    <div class="item"><div class="rot">{{ _("Cleaning lots now") }}</div>
+      <div class="val"><span class="pill es-partial">{{ _("Waiting") }} {{ L.aguardando }}</span><span class="pill es-empty">{{ _("Cleaned, available") }} {{ L.disponiveis }}</span></div>
+      <div class="pequeno suave">{{ _("{n} cleaning lots · today, not filtered by the selection", n=L.n_lotes) }}</div></div>
+  </div>
+  <div class="dupla">
+    {{ grafico('retirada_classe', _("Filters classified A or B"), _("removed from the sample, or still in it (to be decided)")) }}
+    {{ grafico('destino', _("Destination of the removed filters"), _("from the samples of this selection")) }}
+  </div>
+  <div class="dupla">
+    {{ grafico('retirados_periodo', _("Filters removed per month") if e.graficos.retirados_periodo and e.graficos.retirados_periodo.mensal else _("Filters removed per week"), _("by the date of the removal")) }}
+    {{ grafico('origem_filtros', _("Origin of the deposited filters"), _("slots of the samples of this selection")) }}
+  </div>
+  {{ grafico('lotes_limpeza', _("Cleaning lots – filters used in samples"), _("all cleaning lots and all samples (not filtered); the table also shows the lot size, the filters left and the removed filters recorded in it")) }}
+</div>
+
 {# janela Export CSV: escolhe exatamente o que exportar, para a mesma seleção da página #}
 <dialog id="dlg-csv" class="dialogo medio">
   <form method="get" action="{{ url_for('estatisticas_csv') }}" id="form-csv">

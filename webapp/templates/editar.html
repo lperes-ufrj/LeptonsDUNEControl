@@ -27,6 +27,8 @@
   <input type="hidden" name="importacao" value="{{ importacao }}">
   <input type="hidden" name="lotes_json" id="lotes_json" value="{{ lotes_json }}">
   <input type="hidden" name="origens_json" id="origens_json" value="{{ origens_json }}">
+  <input type="hidden" name="reuso_json" id="reuso_json" value="{{ reuso_json }}">
+  <input type="hidden" id="pecas_json" value="{{ pecas_json }}">
   <input type="hidden" name="confirmar_revisao" value="">
   {% for k, v in f.legado.items() %}<input type="hidden" name="legado_{{ k }}" value="{{ v }}">{% endfor %}
 
@@ -71,10 +73,13 @@
           </table>
           <div class="info-lotes" id="info-lotes">{{ _("No batch selected") }}</div>
           <div class="info-origem" id="info-origem" hidden></div>
+          <div class="info-origem" id="info-reuso" hidden></div>
           <div class="linha-botoes">
             <button type="button" class="botao" id="abrir-seletor">{{ _("Add batch / internal lot…") }}</button>
             <button type="button" class="botao" id="abrir-origem" hidden
                     title="{{ _('The filters of this deposition came from more than one box or batch: assign where each filter came from') }}">{{ _("Filter origin…") }}</button>
+            <button type="button" class="botao" id="abrir-reuso" hidden
+                    title="{{ _('Choose which cleaned filter (removed from an earlier sample) is in each slot that comes from a Leptons cleaning lot') }}">{{ _("Cleaned filters…") }}</button>
             <a class="botao" href="{{ url_for('lote_novo') }}" target="_blank" title="{{ _('Opens the Batches tab in a new browser tab. After registering the batch, use “Add batch / internal lot…” again.') }}">{{ _("Register a new batch ↗") }}</a>
           </div>
         </div>
@@ -320,6 +325,22 @@
   <div class="dialogo-rodape"><span id="og-estado" class="suave"></span>
     <button type="button" class="botao" data-fechar>{{ _("Cancel") }}</button>
     <button type="button" class="botao primario" id="og-ok">{{ _("Done") }}</button></div>
+</dialog>
+
+{# ======================= JANELA: FILTROS LIMPOS EM CADA POSIÇÃO ======================= #}
+<dialog id="dlg-reuso" class="dialogo medio">
+  <div class="dialogo-topo"><h2>{{ _("Cleaned filters") }}</h2><button type="button" class="x" data-fechar>✕</button></div>
+  <div class="dialogo-corpo">
+    <p class="suave">{{ _("These slots get filters from a Leptons cleaning lot. Choose which cleaned filter (removed from an earlier sample) is in each one, or fill them in order.") }}</p>
+    <div class="linha-botoes">
+      <button type="button" class="botao" id="ru-ordem">{{ _("Fill in order") }}</button>
+      <button type="button" class="botao" id="ru-limpar">{{ _("Clear all") }}</button>
+    </div>
+    <div id="ru-grupos"></div>
+  </div>
+  <div class="dialogo-rodape"><span id="ru-estado" class="suave"></span>
+    <button type="button" class="botao" data-fechar>{{ _("Cancel") }}</button>
+    <button type="button" class="botao primario" id="ru-ok">{{ _("Done") }}</button></div>
 </dialog>
 
 <script src="{{ url_for('static', filename='editar.js') }}"></script>

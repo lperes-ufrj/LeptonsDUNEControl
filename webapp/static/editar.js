@@ -331,6 +331,7 @@
     $("#abrir-origem").hidden = !varios;
     const info = $("#info-origem");
     info.hidden = !varios;
+    atualizarReuso();
     if (!varios) return;
     const feitos = Object.keys(origens).length;
     const grupos = porLote(origens);
@@ -403,6 +404,112 @@
   });
   $$("[data-fechar]", dlgOrigem).forEach((b) => b.addEventListener("click", () => dlgOrigem.close()));
 
+  // ---------------- filtros limpos (de um lote de limpeza) em cada posição ----------------
+  const entradaReuso = $("#reuso_json");
+  const dlgReuso = $("#dlg-reuso");
+  let reuso = JSON.parse(entradaReuso.value || "{}");          // {nº do filtro: id do filtro retirado}
+  const pecas = JSON.parse($("#pecas_json").value || "{}");    // {id do lote de limpeza: [{id, rotulo, classe}]}
+  let rascunhoReuso = {};
+
+  const pecasDe = (l) => (l.tipo === "limpeza" && pecas[l.interno_id]) || [];
+  // posições que vêm do lote l: todas, se ele é o único; senão as da janela Filter origin
+  function posicoesDe(l) {
+    if (escolhidos.length === 1) return escolhidos[0] === l ? Array.from({ length: N_FILTROS }, (_, i) => i + 1) : [];
+    return Object.entries(origens).filter(([, k]) => k === chave(l)).map(([n]) => +n).sort((a, b) => a - b);
+  }
+  const lotesComPecas = () => escolhidos.filter((l) => pecasDe(l).length);
+  // o que vale: posição de um lote de limpeza + filtro limpo desse lote, sem repetir
+  function podar(mapa) {
+    const saida = {}, vistos = new Set();
+    for (const l of lotesComPecas()) {
+      const ids = new Set(pecasDe(l).map((p) => p.id));
+      for (const n of posicoesDe(l)) {
+        const id = mapa[n];
+        if (id != null && ids.has(+id) && !vistos.has(+id)) { saida[n] = +id; vistos.add(+id); }
+      }
+    }
+    return saida;
+  }
+  function atualizarReuso() {
+    reuso = podar(reuso);
+    entradaReuso.value = JSON.stringify(reuso);
+    const grupos = lotesComPecas();
+    $("#abrir-reuso").hidden = !grupos.length;
+    const info = $("#info-reuso");
+    info.hidden = !grupos.length;
+    if (!grupos.length) return;
+    const total = grupos.reduce((s, l) => s + posicoesDe(l).length, 0), feitos = Object.keys(reuso).length;
+    info.className = "info-origem " + (total && feitos === total ? "sim" : "nao");
+    info.textContent = T("Cleaned filters: ") + (total
+      ? T("{n}/{total} slots with a cleaned filter chosen", { n: feitos, total }) + (feitos < total ? " – " + T("click Cleaned filters…") : "")
+      : T("assign the slots of the cleaning lot in Filter origin… first"));
+  }
+  function desenharReuso() {
+    const caixa = $("#ru-grupos");
+    caixa.innerHTML = "";
+    const usados = new Set(Object.values(rascunhoReuso).map(Number));
+    let total = 0;
+    for (const l of lotesComPecas()) {
+      const ps = pecasDe(l), ns = posicoesDe(l);
+      total += ns.length;
+      const bloco = document.createElement("div");
+      bloco.className = "grupo-reuso";
+      bloco.innerHTML = "<div class='sub-titulo'><b class='mono'>" + esc(l.codigo_interno) + "</b> · " +
+        T("{n} slot(s)", { n: ns.length }) + " · " + T("{n} cleaned filter(s) available", { n: ps.length }) +
+        (ns.length > ps.length ? " <span class='nao'>– " + T("not enough for all slots") + "</span>" : "") + "</div>";
+      const grade = document.createElement("div");
+      grade.className = "grade-reuso";
+      if (!ns.length) grade.innerHTML = "<span class='nao pequeno'>" + T("No slot comes from this lot – assign them in Filter origin….") + "</span>";
+      for (const n of ns) {
+        const cel = document.createElement("label");
+        cel.className = "celula-reuso" + (rascunhoReuso[n] != null ? " cheia" : "");
+        const sel = document.createElement("select");
+        sel.appendChild(new Option("–", ""));
+        for (const p of ps) {
+          const o = new Option(p.rotulo + (p.classe ? " (" + p.classe + ")" : ""), p.id);
+          o.disabled = usados.has(p.id) && +rascunhoReuso[n] !== p.id;
+          sel.appendChild(o);
+        }
+        sel.value = rascunhoReuso[n] != null ? String(rascunhoReuso[n]) : "";
+        sel.addEventListener("change", () => {
+          if (sel.value === "") delete rascunhoReuso[n]; else rascunhoReuso[n] = +sel.value;
+          desenharReuso();
+        });
+        const num = document.createElement("span");
+        num.className = "mono";
+        num.textContent = String(n).padStart(2, "0");
+        cel.append(num, sel);
+        grade.appendChild(cel);
+      }
+      bloco.appendChild(grade);
+      caixa.appendChild(bloco);
+    }
+    const feitos = Object.keys(rascunhoReuso).length;
+    $("#ru-estado").textContent = T("{n}/{total} slots with a cleaned filter chosen", { n: feitos, total });
+    $("#ru-estado").className = total && feitos === total ? "sim" : "nao";
+  }
+  $("#abrir-reuso").addEventListener("click", () => {
+    rascunhoReuso = podar(reuso);
+    desenharReuso();
+    dlgReuso.showModal();
+  });
+  $("#ru-ordem").addEventListener("click", () => {
+    for (const l of lotesComPecas()) {
+      const livres = pecasDe(l).map((p) => p.id).filter((id) => !Object.values(rascunhoReuso).map(Number).includes(id));
+      for (const n of posicoesDe(l)) if (rascunhoReuso[n] == null && livres.length) rascunhoReuso[n] = livres.shift();
+    }
+    desenharReuso();
+  });
+  $("#ru-limpar").addEventListener("click", () => { rascunhoReuso = {}; desenharReuso(); });
+  $("#ru-ok").addEventListener("click", () => {
+    const novo = podar(rascunhoReuso);
+    if (JSON.stringify(novo) !== JSON.stringify(reuso)) marcarAlterado();
+    reuso = novo;
+    atualizarReuso();
+    dlgReuso.close();
+  });
+  $$("[data-fechar]", dlgReuso).forEach((b) => b.addEventListener("click", () => dlgReuso.close()));
+
   // ---------------- janela: escolher lote ----------------
   const dlg = $("#seletor-lotes");
   let catalogo = null, loteAtual = null;
@@ -447,12 +554,13 @@
     const corpo = $("#sl-limpezas");
     const usados = new Set(escolhidos.map(chave));
     corpo.innerHTML = catalogo.limpeza.length ? "" : '<tr><td colspan="9" class="vazio-tabela nao">' + T("No Leptons cleaning lots are " +
-      "registered. Register them in the Batches tab (Leptons cleaning lots).") + "</td></tr>";
+      "registered. Register them in the Cleaning lots tab.") + "</td></tr>";
     catalogo.limpeza.forEach((l, j) => {
       const ja = usados.has(chave(l.entrada));
       const tr = document.createElement("tr");
       tr.innerHTML = "<td><input type='checkbox' data-j='" + j + "'" + (ja ? " disabled" : "") + "></td><td class='mono'><b>" +
         esc(l.codigo) + "</b></td><td>" + esc(l.data) + "</td><td>" + esc(l.responsavel) + "</td><td class='num'>" + esc(l.filtros) +
+        (l.disp != null ? "<br><small class='" + (l.disp ? "sim" : "nao") + "'>" + T("{n} available", { n: l.disp }) + "</small>" : "") +
         "</td><td>" + esc(l.origem) + "</td><td>" + esc(l.ptp) + "</td><td>" + esc(l.resultado) + "</td><td>" + status(l.usado, ja) + "</td>";
       tr.addEventListener("dblclick", () => { $("input", tr).checked = true; adicionar(); });
       corpo.appendChild(tr);
@@ -483,8 +591,11 @@
         const res = (l.resultado || "").trim();
         if (res && res.toLowerCase() !== "approved" &&
             !confirm(T("Cleaning lot {codigo} has result '{res}'.\n\nUse it in this deposition anyway?", { codigo: l.codigo, res }))) return;
-        if (l.usado.length && !confirm(T("Cleaning lot {codigo} was already used (PID {pid}).\n\nUse it again in this deposition?",
-                                         { codigo: l.codigo, pid: l.usado.join(", ") }))) return;
+        if (l.disp == null && l.usado.length && !confirm(T("Cleaning lot {codigo} was already used (PID {pid}).\n\nUse it again in this deposition?",
+                                                           { codigo: l.codigo, pid: l.usado.join(", ") }))) return;
+        if (l.disp === 0 && !confirm(T("Cleaning lot {codigo} has no cleaned filter left (all were used).\n\nUse it in this deposition anyway?",
+                                       { codigo: l.codigo }))) return;
+        pecas[l.id] = l.pecas || [];
         novos.push(l.entrada);
       });
     }

@@ -24,7 +24,8 @@ from werkzeug.utils import secure_filename
 
 import leptons_auth
 
-from . import backup, banco, chegada, dados, estatisticas, i18n, inicio, lotes, pdf, planilha, relatorio, tarefas
+from . import (backup, banco, chegada, dados, estatisticas, i18n, inicio, lotes, pdf, planilha, projecoes, relatorio,
+               retirados, tarefas)
 from .i18n import t
 
 LOGOS = ("esquerda.png", "direita.png")
@@ -204,7 +205,44 @@ def criar_app():
                                proxima=todas[i - 1] if i > 0 else None,
                                anexos=[a for a in (d["tarefa"].get("anexos_txt") or "").split(";") if a.strip()],
                                pode_revisar=usuario()["perfil"] in PERFIS_REVISORES,
+                               retirados_amostra=retirados.da_amostra(tarefa_id), reusados=retirados.reusados(tarefa_id),
+                               classes_retiraveis=retirados.CLASSES_RETIRAVEIS,
                                **lateral(todas, lote=l0["opto"], interno=l0["interno"]))
+
+    # ---------------- filtros retirados na inspeção visual (A ou B): descarte ou limpeza ----------------
+    @app.route("/sample/<int:tarefa_id>/filter/<int:filtro>/remove", methods=["POST"])
+    def retirar_filtro(tarefa_id, filtro):
+        """Retirar não muda a inspeção nem o sign-off: a posição fica vazia e a retirada vai para a auditoria."""
+        d = dados.ler_tarefa(tarefa_id)
+        if d is None:
+            abort(404)
+        destino = request.form.get("destino", "")
+        r, erro = retirados.retirar(d, filtro, destino, request.form.get("obs", "").strip(), nome_usuario())
+        voltar = redirect(url_for("tarefa", tarefa_id=tarefa_id) + "#visual")
+        if erro:
+            flash(erro, "erro")
+            return voltar
+        registrar("FILTER_DISCARD" if destino == retirados.DESCARTE else "FILTER_TO_CLEANING",
+                  f"id={tarefa_id} PID={r['pid']} filter={filtro} class={r['classe']}"
+                  + (f" note={r['observacao']}" if r.get("observacao") else ""))
+        flash(t("Filter {n} discarded.", n=filtro) if destino == retirados.DESCARTE
+              else t("Filter {n} removed and put on the waiting list of the Cleaning lots tab.", n=filtro), "ok")
+        return voltar
+
+    @app.route("/removed/<int:retirado_id>/undo", methods=["POST"])
+    def desfazer_retirada(retirado_id):
+        r, erro = retirados.desfazer(retirado_id)
+        if r is None:
+            abort(404)
+        voltar = request.form.get("voltar", "")
+        voltar = redirect(voltar if voltar.startswith("/") and not voltar.startswith("//")
+                          else url_for("tarefa", tarefa_id=r["id_tarefa"]) + "#visual")
+        if erro:
+            flash(erro, "erro")
+            return voltar
+        registrar("FILTER_REMOVE_UNDO", f"id={r['id_tarefa']} PID={r['pid']} filter={r['filtro']} (was {r['destino']})")
+        flash(t("Filter {rotulo} put back in its sample.", rotulo=r["rotulo"]), "ok")
+        return voltar
 
     @app.route("/run/<numero>")
     def run(numero):
@@ -224,7 +262,8 @@ def criar_app():
                                numero=id_mostrado(f["id"]) if f["id"] else "",
                                lotes_json=json.dumps(f["lotes"]),
                                origens_json=json.dumps({n: lotes.chave(f["lotes"][i]) for n, i in f["origens"].items()
-                                                        if i < len(f["lotes"])}))
+                                                        if i < len(f["lotes"])}),
+                               reuso_json=json.dumps(f["reuso"]), pecas_json=json.dumps(retirados.disponiveis(f["id"])))
 
     @app.route("/sample/new")
     def nova_tarefa():
@@ -299,14 +338,21 @@ def criar_app():
             antiga = tarefas.ler(tarefa_id)
             f["signoff"] = antiga["signoff"]
 
+        f["reuso"], avisos_reuso = retirados.validar_reuso(f, tarefa_id)
+        reuso_antes = {n: r["id"] for n, r in retirados.reusados(tarefa_id).items()} if tarefa_id is not None else {}
         nova = tarefa_id is None
         tarefa_id = tarefas.gravar(f, tarefa_id)
         status, pend = tarefas.atualizar_status(tarefa_id)
         registrar("TASK_CREATE" if nova else "TASK_UPDATE", f"id={tarefa_id} PID={f['pid']} status={status}")
+        mudou = retirados.mudancas_reuso(reuso_antes, f["reuso"])
+        if mudou:
+            registrar("FILTER_REUSE", f"id={tarefa_id} PID={f['pid']} {mudou}")
         if imp is not None:
             _IMPORTACOES.pop(token, None)
         flash((t("Sample saved.") if nova else t("Sample updated.")) + " " + texto_status(status, pend),
               "ok" if status != dados.STATUS_INCOMPLETO else "aviso")
+        for aviso in avisos_reuso:
+            flash(aviso, "aviso")
         return redirect(url_for("tarefa", tarefa_id=tarefa_id))
 
     @app.route("/sample/<int:tarefa_id>/delete", methods=["POST"])
@@ -317,10 +363,14 @@ def criar_app():
         if negado:
             return negado
         numero = id_mostrado(tarefa_id)
+        soltos = len(retirados.reusados(tarefa_id))
+        apagados = sum(1 for r in retirados.da_amostra(tarefa_id).values() if r["limpeza_id"] is None)
         pid = tarefas.excluir(tarefa_id)
         if pid is None:
             abort(404)
-        registrar("TASK_DELETE", f"id={tarefa_id} PID={pid}")
+        registrar("TASK_DELETE", f"id={tarefa_id} PID={pid}"
+                  + (f"; {soltos} cleaned filter(s) free again" if soltos else "")
+                  + (f"; {apagados} removed filter(s) not yet in a cleaning lot dropped" if apagados else ""))
         flash(t("Sample ID {n} ({pid}) deleted.", n=numero, pid=pid or "-"), "ok")
         return redirect(url_for("lista"))
 
@@ -336,16 +386,22 @@ def criar_app():
     @app.route("/api/batches")
     def api_lotes():
         """Lotes OPTO / internos / de limpeza para a janela 'Add batch / internal lot'."""
-        return lotes.catalogo(request.args.get("sample", type=int))
+        sample = request.args.get("sample", type=int)
+        cat = lotes.catalogo(sample)
+        disp, controlados = retirados.disponiveis(sample), retirados.por_limpeza()
+        for l in cat["limpeza"]:
+            l["pecas"] = disp.get(l["id"], [])
+            l["disp"] = len(l["pecas"]) if l["id"] in controlados else None      # lotes antigos: sem filtros controlados
+        return cat
 
     # =====================================================================
     # LOTES: chegada de lotes OPTO (caixas menores = lotes internos) e lotes de limpeza do Leptons
     # (os nomes das páginas começam com "lote": é assim que a barra superior marca a aba Batches)
     # =====================================================================
     def lateral_lotes(atual=None, res=""):
-        """Barra lateral da aba Batches: resultado da inspeção, lotes OPTO e lotes de limpeza."""
+        """Barra lateral da aba Batches: resultado da inspeção e lotes OPTO."""
         todos = chegada.listar()
-        return {"lat_lotes": todos, "lote_atual": atual, "res": res, "n_limpezas": len(lotes.limpezas()),
+        return {"lat_lotes": todos, "lote_atual": atual, "res": res,
                 "contagem_res": {r: sum(1 for l in todos if l["resultado_inspecao"] == r) for r in chegada.RESULTADOS}}
 
     def amostras_que_usaram(usos):
@@ -473,51 +529,84 @@ def criar_app():
         return Response(chegada.csv_texto(), mimetype="text/csv",
                         headers={"Content-Disposition": 'attachment; filename="opto_batches.csv"'})
 
+    # =====================================================================
+    # ABA CLEANING: filtros retirados aguardando limpeza, lotes de limpeza do Leptons (DUNE-LP-000X), descartados
+    # =====================================================================
     def pagina_limpeza(f, erro=None):
         todas = lotes.limpezas()
         usado = {l["id"]: amostras_que_usaram(chegada.usos(limpeza_id=l["id"]))[0].get(l["id"], []) for l in todas}
+        # no formulário: os filtros que aguardam limpeza e os que já estão no lote aberto
+        no_lote = retirados.da_limpeza(f["id"]) if f["id"] is not None else []
         return render_template("limpeza.html", f=f, limpezas=todas, usado=usado, erro=erro, chegada=chegada,
-                               **lateral_lotes())
+                               aguardando=retirados.aguardando(), no_lote=no_lote, por_limpeza=retirados.por_limpeza(),
+                               descartados=retirados.descartados())
 
-    @app.route("/batches/cleaning")
-    def lotes_limpeza():
+    @app.route("/cleaning")
+    def limpeza_pagina():
         editar = request.args.get("edit", type=int)
         if editar is None:
-            return pagina_limpeza(chegada.limpeza_vazia(nome_usuario()))
+            f = chegada.limpeza_vazia(nome_usuario())
+            f["retirados"] = []
+            return pagina_limpeza(f)
         limp = lotes.limpeza(editar, None)
         if limp is None:
             abort(404)
-        return pagina_limpeza(chegada.limpeza_formulario(limp))
+        f = chegada.limpeza_formulario(limp)
+        f["retirados"] = [r["id"] for r in retirados.da_limpeza(editar)]
+        return pagina_limpeza(f)
 
-    @app.route("/batches/cleaning/save", methods=["POST"])
-    def lotes_limpeza_gravar():
+    @app.route("/batches/cleaning")
+    def limpeza_endereco_antigo():
+        return redirect(url_for("limpeza_pagina", **request.args))
+
+    @app.route("/cleaning/save", methods=["POST"])
+    def limpeza_gravar():
         f = chegada.limpeza_de_formulario(request.form)
         if f["id"] is not None and lotes.limpeza(f["id"], None) is None:
             abort(404)
+        # filtros controlados do lote: os usados numa sample ficam, mesmo que a caixa venha desmarcada
+        usados = [r["id"] for r in (retirados.da_limpeza(f["id"]) if f["id"] is not None else []) if r["usado_tarefa_id"]]
+        f["retirados"] = sorted(set(request.form.getlist("retirado", type=int)) | set(usados))
+        if f["retirados"]:
+            linhas = [r for r in map(retirados.um, f["retirados"]) if r]
+            if not f["filtros"]:
+                f["filtros"] = str(len(f["retirados"]))
+            if not f["origem"]:
+                f["origem"] = retirados.origem_texto(linhas)
         codigo, erro = chegada.validar_limpeza(f)
+        if not erro and f["retirados"]:
+            erro = retirados.validar_limpeza(f["id"], f["retirados"])
+            if not erro and int(f["filtros"]) < len(f["retirados"]):
+                erro = t("Number of filters ({n}) is smaller than the {m} removed filters chosen for the lot.",
+                         n=f["filtros"], m=len(f["retirados"]))
         if erro:
             return pagina_limpeza(f, erro), 400
-        chegada.gravar_limpeza(f, codigo)
-        registrar("CLEANING_LOT_SAVE", codigo)
+        limpeza_id = chegada.gravar_limpeza(f, codigo)
+        entram, saem = retirados.definir_limpeza(limpeza_id, codigo, f["retirados"])
+        registrar("CLEANING_LOT_SAVE", f"{codigo} filters={f['filtros']} tracked={len(f['retirados'])}"
+                  + (f"; added: {retirados.lista_auditoria(entram)}" if entram else "")
+                  + (f"; back to waiting: {retirados.lista_auditoria(saem)}" if saem else ""))
         flash(t("Cleaning lot {codigo} saved.", codigo=codigo), "ok")
-        return redirect(url_for("lotes_limpeza"))
+        return redirect(url_for("limpeza_pagina"))
 
-    @app.route("/batches/cleaning/<int:limpeza_id>/delete", methods=["POST"])
-    def lotes_limpeza_excluir(limpeza_id):
+    @app.route("/cleaning/<int:limpeza_id>/delete", methods=["POST"])
+    def limpeza_excluir(limpeza_id):
         if lotes.limpeza(limpeza_id, None) is None:
             abort(404)
-        negado = confirmar_exclusao(f"cleaning lot id={limpeza_id}", url_for("lotes_limpeza", edit=limpeza_id))
+        negado = confirmar_exclusao(f"cleaning lot id={limpeza_id}", url_for("limpeza_pagina", edit=limpeza_id))
         if negado:
             return negado
         codigo = chegada.excluir_limpeza(limpeza_id)
         if codigo is None:
             abort(404)
-        registrar("CLEANING_LOT_DELETE", codigo)
-        flash(t("Cleaning lot {codigo} deleted. Depositions that already used it keep the code in their records.", codigo=codigo), "ok")
-        return redirect(url_for("lotes_limpeza"))
+        soltos = retirados.soltar_limpeza(limpeza_id)
+        registrar("CLEANING_LOT_DELETE", codigo + (f" ({soltos} filter(s) back to waiting)" if soltos else ""))
+        flash(t("Cleaning lot {codigo} deleted. Depositions that already used it keep the code in their records.", codigo=codigo)
+              + (" " + t("{n} filter(s) went back to the waiting list.", n=soltos) if soltos else ""), "ok")
+        return redirect(url_for("limpeza_pagina"))
 
-    @app.route("/batches/cleaning.pdf")
-    def lotes_limpeza_pdf():
+    @app.route("/cleaning.pdf")
+    def limpeza_pdf():
         pdf.PASTA_PDF.mkdir(parents=True, exist_ok=True)
         caminho = pdf.PASTA_PDF / "Leptons_cleaning_lots.pdf"
         try:
@@ -525,6 +614,14 @@ def criar_app():
         except PermissionError:
             return erro_pagina(t("Could not write the file. Close the PDF if it is open and try again: {caminho}", caminho=caminho))
         return send_file(str(caminho), mimetype="application/pdf", download_name=caminho.name)
+
+    # =====================================================================
+    # PROJEÇÕES (só Admin): quando cada etapa chega às 2000 samples
+    # =====================================================================
+    @app.route("/projections")
+    @so_admin
+    def projecoes_pagina():
+        return render_template("projecoes.html", p=projecoes.calcular(), dados=dados)
 
     # =====================================================================
     # ESTATÍSTICAS DO PROCESSO
@@ -735,6 +832,8 @@ def criar_app():
             return redirect(url_for("importar_json"))
         imp["signoff"] = f["signoff"]
         f["id"] = destino
+        if destino is not None:          # o .json não leva os filtros limpos: ficam os que a sample já tinha
+            f["reuso"] = (tarefas.ler(destino) or {}).get("reuso", {})
         registrar("TASK_IMPORT_JSON", f"PID={imp['pid']} file={imp['arquivo']} "
                                       f"into={'new' if destino is None else 'id=' + str(destino)}")
         avisos = [t("Sample {pid} loaded from {arquivo}. Review the data, then click Save to create it." if destino is None

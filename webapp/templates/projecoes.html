@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block titulo %}{{ _("Projections") }}{% endblock %}
+{# "daqui a 4.4 anos" / "daqui a 7 meses" a partir de hoje #}
+{% macro daqui(d) %}{% set dias = (d - p.hoje).days %}{% if dias < 0 %}{{ _("already passed") }}{% elif dias < 60 %}{{ _("in {n} days", n=dias) }}{% elif dias < 730 %}{{ _("in {n} months", n=(dias / 30.44)|round|int) }}{% else %}{{ _("in {n} years", n="%.1f"|format(dias / 365.25)) }}{% endif %}{% endmacro %}
+{% macro ritmo(r) %}{% if r %}{{ "%.1f"|format(r * 7) }} <span class="suave">{{ _("samples/week") }}</span>{% else %}<span class="suave">–</span>{% endif %}{% endmacro %}
+{% block conteudo %}
+<div class="cabecalho">
+  <div>
+    <h1>{{ _("Projections") }}</h1>
+    <div class="sub">{{ _("Target: {meta} samples in each stage. The projection considers each stage's samples from the {m}th on.", meta=p.meta, m=p.minimo) }}</div>
+  </div>
+</div>
+
+<div class="resumo">
+  {% for e in p.etapas %}
+  <div class="item">
+    <div class="rot"><i class="chave-serie" style="background: var(--serie-{{ e.cor }})"></i>{{ e.nome }}</div>
+    <div class="val grande">{{ e.n }}<span class="pequeno suave">/{{ p.meta }}</span></div>
+    <div class="barra"><span style="width: {{ e.pct }}%"></span></div>
+    <div class="pequeno suave">{{ "%.1f"|format(e.pct) }} % · {{ _("{n} to go", n=e.faltam) }}</div>
+    <div class="previsao">
+      {% if e.previsao %}
+        <span class="suave pequeno">{{ _("Projected") }}</span> <b class="mono">{{ e.previsao }}</b>
+        <span class="pequeno suave">{{ daqui(e.previsao) }}</span>
+      {% else %}<span class="pequeno nao">{{ e.motivo }}</span>{% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="cartao estat-cartao">
+  {% if p.graficos %}
+  <div class="legenda-grafico">{% for s in p.graficos.series %}<span><i style="background: var(--serie-{{ s.cor }})"></i>{{ s.nome }}</span>{% endfor %}
+    <span><i class="tracejado"></i>{{ _("projection") }}</span></div>
+  <figure class="grafico-bloco">
+    <figcaption><b>{{ _("Samples completed so far") }}</b><small>{{ _("cumulative, by the date of each stage") }}</small></figcaption>
+    <div class="grafico alto" data-g="real" role="img" aria-label="{{ _('Samples completed so far') }}"></div>
+  </figure>
+  <figure class="grafico-bloco">
+    <figcaption><b>{{ _("Projection to {meta} samples", meta=p.meta) }}</b><small>{{ _("dashed: the fitted pace extended from the last sample to the target") }}</small></figcaption>
+    {% if p.etapas|selectattr('previsao')|list %}
+    <div class="grafico alto" data-g="projecao" role="img" aria-label="{{ _('Projection to {meta} samples', meta=p.meta) }}"></div>
+    {% else %}
+    <div class="sem-dados">{{ _("No stage has {m} samples yet – the projection starts at the {m}th sample.", m=p.minimo) }}</div>
+    {% endif %}
+  </figure>
+  {% else %}
+  <div class="sem-dados" style="margin-bottom: 18px">{{ _("No sample has a stage completed with a date yet.") }}</div>
+  {% endif %}
+</div>
+
+<div class="cartao rolagem" style="padding: 6px 8px">
+  <table class="tabela-tarefas quebra">
+    <thead><tr><th>{{ _("Stage") }}</th><th class="num">{{ _("Samples done") }}</th><th class="num">{{ _("To go") }}</th>
+      <th>{{ _("First") }}</th><th>{{ _("Last") }}</th>
+      <th class="num">{{ _("Pace (fit)") }}</th><th>{{ _("Projected date") }}</th>
+      <th class="num">{{ _("Pace (last {n} weeks)", n=p.semanas) }}</th><th>{{ _("At the recent pace") }}</th></tr></thead>
+    <tbody>
+    {% for e in p.etapas %}
+      <tr>
+        <td><i class="chave-serie" style="background: var(--serie-{{ e.cor }})"></i>{{ e.nome }}</td>
+        <td class="num mono">{{ e.n }}{% if e.sem_data %} <span class="suave" title="{{ _('done but without the stage date: not in the charts') }}">({{ _("{n} undated", n=e.sem_data) }})</span>{% endif %}</td>
+        <td class="num mono">{{ e.faltam }}</td>
+        <td class="mono">{{ e.primeira or '–' }}</td><td class="mono">{{ e.ultima or '–' }}</td>
+        <td class="num mono">{{ ritmo(e.ritmo) }}{% if e.ajuste_desde %}<br><span class="suave pequeno">{{ _("from {d}", d=e.ajuste_desde) }}</span>{% endif %}</td>
+        <td>{% if e.previsao %}<b class="mono">{{ e.previsao }}</b> <span class="suave pequeno">{{ daqui(e.previsao) }}</span>{% else %}<span class="suave pequeno">{{ e.motivo or '–' }}</span>{% endif %}</td>
+        <td class="num mono">{% if e.n >= p.minimo %}{{ ritmo(e.ritmo_recente) }}{% else %}<span class="suave">–</span>{% endif %}</td>
+        <td>{% if e.previsao_recente %}<span class="mono">{{ e.previsao_recente }}</span> <span class="suave pequeno">{{ daqui(e.previsao_recente) }}</span>
+            {% elif e.n >= p.minimo and e.n < p.meta and not e.recentes %}<span class="suave pequeno">{{ _("no sample in the last {n} weeks", n=p.semanas) }}</span>{% else %}<span class="suave">–</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<p class="nota">{{ _("How it is counted: Deposition – masses measured at the three positions (deposition date); Visual inspection – all {f} filters classified (inspection date); Cryogenic immersion and Optical efficiency – result Approved or Rejected (test date). Rejected samples count, since they went through the stage.", f=dados.N_FILTROS) }}
+  {{ _("Pace (fit) is the slope of a least-squares line through the cumulative count by date, using only the samples from the {m}th on (the first ones are the slower start); the projection extends it from the last sample to the target. The recent pace uses only the last {n} weeks.", m=p.minimo, n=p.semanas) }}</p>
+
+<script type="application/json" id="dados-projecao">{{ p.graficos|tojson }}</script>
+<script src="{{ url_for('static', filename='projecoes.js') }}"></script>
+{% endblock %}

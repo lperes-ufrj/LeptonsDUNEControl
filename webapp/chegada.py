@@ -456,6 +456,7 @@ def validar_limpeza(f):
 
 
 def gravar_limpeza(f, codigo):
+    """Grava o lote de limpeza; retorna o id (novo ou o mesmo)."""
     valores = (codigo, f["data"], f["resp"], f["filtros"], f["origem"], f["ptp"], f["proc"], f["resultado"], f["obs"])
     con = conectar()
     try:
@@ -464,10 +465,12 @@ def gravar_limpeza(f, codigo):
                 con.execute("""INSERT INTO lotes_limpeza (codigo_interno, data_limpeza, responsavel, quantidade_filtros,
                                origem, remocao_ptp, procedimento, resultado, observacoes, data_hora_registro)
                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", valores + (data_hora_atual(),))
+                return con.execute("SELECT last_insert_rowid()").fetchone()[0]
             else:
                 con.execute("""UPDATE lotes_limpeza SET codigo_interno = ?, data_limpeza = ?, responsavel = ?,
                                quantidade_filtros = ?, origem = ?, remocao_ptp = ?, procedimento = ?, resultado = ?,
                                observacoes = ? WHERE id = ?""", valores + (f["id"],))
+                return f["id"]
     finally:
         con.close()
 

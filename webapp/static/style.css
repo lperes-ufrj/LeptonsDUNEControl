@@ -39,7 +39,7 @@ a { color: var(--acento); }
 
 /* ---------- barra superior ---------- */
 .topo {
-  position: sticky; top: 0; z-index: 10; height: 54px; display: flex; align-items: center; gap: 28px;
+  position: sticky; top: 0; z-index: 10; height: 54px; display: flex; align-items: center; gap: 22px;
   padding: 0 20px; background: #fff; border-bottom: 1px solid var(--borda);
   box-shadow: inset 0 -3px 0 var(--lima);
 }
@@ -47,7 +47,8 @@ a { color: var(--acento); }
 .marca img { height: 28px; display: block; }
 .marca .produto { padding-left: 12px; border-left: 1px solid var(--borda-forte); line-height: 1.15; }
 .marca .produto small { display: block; font-size: 11px; font-weight: 500; color: var(--suave); letter-spacing: .02em; }
-.nav { display: flex; gap: 22px; height: 100%; }
+.nav { display: flex; gap: 18px; height: 100%; }
+.nav a, .marca, .topo .botao, .topo .quem { white-space: nowrap; }
 .nav a {
   display: flex; align-items: center; color: var(--texto-2); text-decoration: none; font-weight: 500;
   border-bottom: 2px solid transparent;
@@ -55,7 +56,7 @@ a { color: var(--acento); }
 .nav a.ativo { color: var(--texto); font-weight: 700; border-bottom: 3px solid var(--cinza-logo); }
 .topo .direita { margin-left: auto; display: flex; align-items: center; gap: 12px; }
 .busca-topo input {
-  width: 260px; padding: 7px 14px; border: 1px solid var(--borda-forte); border-radius: 999px;
+  width: clamp(150px, 15vw, 260px); padding: 7px 14px; border: 1px solid var(--borda-forte); border-radius: 999px;
   font: inherit; background: #fff;
 }
 .busca-topo input:focus { outline: 2px solid var(--acento-fundo); border-color: var(--acento); }
@@ -262,6 +263,10 @@ button.link:hover { color: var(--acento); }
 .aviso-flash.aviso { border-color: #f5d7ae; border-left-color: var(--laranja); background: var(--laranja-fundo); }
 .aviso-flash.erro { border-color: #f5c6c2; border-left-color: var(--vermelho); background: var(--vermelho-fundo); }
 .aviso-flash .botao { margin-top: 2px; }
+.aviso-flash.fechavel { position: relative; padding-right: 38px; overflow-wrap: anywhere; }
+.fechar-aviso { position: absolute; top: 5px; right: 6px; width: 26px; height: 26px; border: 0; border-radius: 6px;
+  background: transparent; color: var(--suave); font-size: 14px; line-height: 1; cursor: pointer; }
+.fechar-aviso:hover { background: rgba(0, 0, 0, .07); color: inherit; }
 
 .barra-acoes { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 16px; }
 .barra-acoes form { display: inline-flex; margin: 0; }
@@ -270,6 +275,7 @@ button.link:hover { color: var(--acento); }
 
 /* campos */
 .cartao input:not([type=radio]):not([type=checkbox]):not([type=file]), .cartao select, .cartao textarea,
+.dialogo .bloco-texto input,
 .acoes input, .linha-form input, .linha-form select {
   font: 14px var(--sans); color: var(--texto); padding: 6px 9px; border: 1px solid var(--borda-forte); border-radius: 6px;
   background: #fff; min-width: 0;
@@ -500,7 +506,7 @@ a.pill:hover { filter: brightness(.95); text-decoration: underline; }
 /* ---------- aba Statistics ---------- */
 :root {
   /* cores das séries dos gráficos (paleta validada para daltonismo; 1-2-3 = Center, Middle, External) */
-  --serie-1: #2a78d6; --serie-2: #eb6834; --serie-3: #1baf7a;
+  --serie-1: #2a78d6; --serie-2: #eb6834; --serie-3: #1baf7a; --serie-4: #eda100;
   --grade-grafico: #e9e9e4; --base-grafico: #c3c2b7;
 }
 .filtros-estat { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin-bottom: 16px; }
@@ -571,3 +577,44 @@ a.pill:hover { filter: brightness(.95); text-decoration: underline; }
 .tabela-estat tbody tr.sem-membros:hover td { background: none; }
 .tabela-estat tbody tr[data-linha]:focus-visible { outline: 2px solid var(--acento); outline-offset: -2px; }
 #dlg-membros td.mono:last-child { white-space: normal; }
+/* filtros retirados (página da sample) e aba Cleaning */
+tr.retirado td { background: #f6f6f3; color: var(--suave); }
+tr.retirado td.classe-A, tr.retirado td.classe-B { opacity: .7; }
+td.retirada { white-space: nowrap; width: 1%; }
+td.retirada .pill { margin-right: 4px; }
+form.em-linha { display: inline; margin-left: 4px; }
+a.reuso { display: block; font-size: 10.5px; color: var(--acento); text-decoration: none; white-space: nowrap; }
+.opcoes-retirar { display: flex; flex-direction: column; gap: 10px; margin: 10px 0 12px; }
+.opcoes-retirar .marcar { align-items: flex-start; font-size: 13px !important; }
+.opcoes-retirar .marcar input { margin-top: 3px; }
+/* janela Cleaned filters do formulário */
+.grupo-reuso { margin: 12px 0 4px; }
+.grade-reuso { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px 10px; margin-top: 6px; }
+.celula-reuso { display: flex; align-items: center; gap: 8px; border: 1px solid var(--borda); border-radius: 7px; padding: 4px 8px; font-size: 13px; }
+.celula-reuso.cheia { background: var(--lima-claro); border-color: var(--borda-forte); }
+.celula-reuso select { flex: 1; min-width: 0; font: inherit; font-size: 12px; padding: 3px 4px; border: 1px solid var(--borda-forte); border-radius: 6px; background: #fff; }
+.info-retirada { color: var(--suave); cursor: help; font-size: 13px; margin-right: 2px; }
+.contagem-lp { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--suave); margin-left: 6px; }
+/* aba Projections */
+.chave-serie { display: inline-block; width: 12px; height: 3px; border-radius: 1px; margin-right: 7px; vertical-align: middle; }
+.resumo .item .previsao { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--borda); }
+.resumo .item .previsao b { font-size: 15px; }
+.grafico .linha.tracejada { stroke-dasharray: 6 5; }
+.grafico .limite.hoje { stroke: var(--base-grafico); }
+.legenda-grafico i.tracejado { background: repeating-linear-gradient(90deg, var(--texto-2) 0 5px, transparent 5px 9px); }
+.dica-chave.tracejada { background-image: repeating-linear-gradient(90deg, transparent 0 3px, #fff 3px 5px) !important; }
+/* barra superior com todas as abas (Admin): em telas menores fica só o logo, sem o nome do programa */
+@media (max-width: 1360px) { .marca .produto { display: none; } }
+.resumo.resumo-secao { margin: 4px 0 18px; }
+.resumo.resumo-secao .item { background: var(--bg); }
+.linha-secao a.direita { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 500; }
+/* Manage users: o cartão New user numa faixa larga, campos lado a lado */
+.form-novo-usuario { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)) auto; gap: 12px 14px; align-items: end; }
+.form-novo-usuario select { width: 100%; padding: 8px 9px; border-radius: 7px; }
+.form-novo-usuario .botao.primario { padding: 9px 22px; }
+@media (max-width: 1100px) { .form-novo-usuario { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.form-novo-usuario input, .form-novo-usuario select, .form-novo-usuario .botao.primario { height: 38px; box-sizing: border-box; }
+/* campo com um botão dentro, à direita (senha temporária + Generate) */
+.campo-com-botao { position: relative; display: block; }
+.campo-com-botao input { width: 100%; padding-right: 84px !important; }
+.campo-com-botao .botao { position: absolute; right: 5px; top: 50%; transform: translateY(-50%); }

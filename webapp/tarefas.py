@@ -9,7 +9,7 @@ import re
 import sqlite3
 from datetime import datetime
 
-from . import banco, dados, lotes
+from . import banco, dados, lotes, retirados
 from .i18n import t
 
 AMOSTRAS = dados.AMOSTRAS
@@ -85,7 +85,7 @@ def amostra_eficiencia(r):
 def vazio(responsavel=""):
     """Tarefa nova: data de hoje e o usuário logado como responsável."""
     return {
-        "id": None, "lotes": [], "origens": {}, "run": "", "data": hoje(), "pid": "", "pid_p02": "", "pid_p03": "", "pid_p14": "",
+        "id": None, "lotes": [], "origens": {}, "reuso": {}, "run": "", "data": hoje(), "pid": "", "pid_p02": "", "pid_p03": "", "pid_p14": "",
         "posicao": "", "responsavel": responsavel, "tipo": "Substrate", "obs": "", "anexos": [],
         "massas": {p: {"antes": "", "depois": ""} for p in POSICOES}, "massa_ptp": "", "lote_ptp": "",
         "insp": {k: "" for k in CAMPOS_INSPECAO},
@@ -118,6 +118,12 @@ def de_conexao(con, tarefa_id):
         i = next((i for i, e in enumerate(f["lotes"]) if lotes.mesma_origem(dict(r), e)), None)
         if i is not None and r["filtro"] in range(1, dados.N_FILTROS + 1):
             f["origens"][r["filtro"]] = i
+    # filtros limpos (de um lote de limpeza) em cada posição: {nº do filtro: id em filtro_retirado}
+    try:
+        f["reuso"] = {r["usado_filtro"]: r["id"] for r in con.execute(
+            "SELECT id, usado_filtro FROM filtro_retirado WHERE usado_tarefa_id = ?", (tarefa_id,))}
+    except sqlite3.OperationalError:            # cópia em memória de um .json: sem a tabela
+        pass
     f.update(data=_txt(t.get("data_inicio")), pid=_txt(t.get("codigo_tarefa")), posicao=_txt(t.get("position_range")),
              responsavel=_txt(t.get("responsavel")), obs=_txt(t.get("observacoes")),
              tipo=banco.TIPOS_ANTIGOS.get(t.get("descricao"), t.get("descricao")) or "Substrate",
@@ -182,6 +188,12 @@ def de_formulario(form):
     indice = {lotes.chave(l): i for i, l in enumerate(f["lotes"])}
     f["origens"] = {int(n): indice[k] for n, k in (brutas.items() if isinstance(brutas, dict) else ())
                     if str(n).isdigit() and 1 <= int(n) <= dados.N_FILTROS and k in indice}
+    try:
+        brutas = json.loads(form.get("reuso_json") or "{}")
+    except ValueError:
+        brutas = {}
+    f["reuso"] = {int(n): int(i) for n, i in (brutas.items() if isinstance(brutas, dict) else ())
+                  if str(n).isdigit() and 1 <= int(n) <= dados.N_FILTROS and str(i).isdigit()}
     for k in ("run", "data", "pid", "pid_p02", "pid_p03", "pid_p14", "posicao", "responsavel", "obs",
               "massa_ptp", "lote_ptp"):
         f[k] = g(k)
@@ -349,6 +361,7 @@ def gravar(f, tarefa_id=None):
                            VALUES (?, ?, ?, '', '', ?, ?, ?, ?, ?, ?)""",
                         (tarefa_id, a, r["testada"], r["antes"], r["depois"], r["area"],
                          "" if dens is None else f"{dens:.2f}", r["x"], {"Approved": "Yes", "Rejected": "No"}.get(cond, "")))
+        retirados.gravar_reuso(cur, tarefa_id, f["reuso"])
         con.commit()
     finally:
         con.close()
@@ -379,6 +392,7 @@ def excluir(tarefa_id):
             return None
         for tabela in TABELAS_TAREFA:
             con.execute(f"DELETE FROM {tabela} WHERE id_tarefa = ?", (tarefa_id,))
+        retirados.ao_excluir_amostra(con, tarefa_id)
         con.execute("DELETE FROM tarefas WHERE id = ?", (tarefa_id,))
         con.commit()
         return r[0] or ""

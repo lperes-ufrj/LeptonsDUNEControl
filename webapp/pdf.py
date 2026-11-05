@@ -7,7 +7,7 @@ from PIL import Image, ImageChops
 
 from . import dados
 from .relatorio import (AMOSTRAS_EFICIENCIA, AMOSTRAS_IMERSAO, ITENS_IMERSAO, LIMITE_EFICIENCIA, LIMITE_PERDA_PCT,
-                        MIN_AMOSTRAS_EFICIENCIA, N_FILTROS, TXT_ESTADO, area_amostra_ef, coletar_dados_relatorio,
+                        MIN_AMOSTRAS_EFICIENCIA, N_FILTROS, TXT_ESTADO, area_amostra_ef, coletar_dados_relatorio, comentario_filtro,
                         decisao_lote, diferenca_massas_ef, estado_eficiencia_dados, estado_imersao_dados,
                         resumo_visual_dados)
 
@@ -258,7 +258,7 @@ def gerar_pdf_relatorio(tarefa_id, caminho):
     for n in range(1, N_FILTROS + 1):
         f = d["filtros"].get(n, {})
         linha = [format(n, "02d")] + [(f.get(k) or "-") for k in chaves]
-        linha.append(P(f.get("comments"), ParagraphStyle("cm", parent=est_cel, fontSize=6.8, leading=8), vazio=""))
+        linha.append(P(comentario_filtro(d, n), ParagraphStyle("cm", parent=est_cel, fontSize=6.8, leading=8), vazio=""))
         linha.append(f.get("classification") or "-")
         linhas_v.append(linha)
         for c in list(range(1, 8)) + [9]:

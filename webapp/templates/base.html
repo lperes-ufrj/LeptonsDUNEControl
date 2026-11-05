@@ -15,16 +15,19 @@
 </head>
 <body>
   {% set em_lotes = (request.endpoint or '').startswith('lote') %}
+  {% set em_limpeza = (request.endpoint or '').startswith('limpeza') %}
   <header class="topo">
     <a class="marca" href="{{ url_for('lista') }}">
       <img src="{{ url_for('static', filename='leptons.png') }}" alt="LEPTONS Lab">
       <span class="produto">Deposition Control<small>Unicamp · DUNE</small></span>
     </a>
     <nav class="nav">
-      <a href="{{ url_for('lista') }}" class="{{ 'ativo' if not em_lotes and request.endpoint not in ('usuarios', 'auditoria', 'trocar_senha', 'estatisticas_pagina') }}">{{ _("Samples") }}</a>
+      <a href="{{ url_for('lista') }}" class="{{ 'ativo' if not em_lotes and request.endpoint not in ('usuarios', 'auditoria', 'trocar_senha', 'estatisticas_pagina', 'projecoes_pagina') and not em_limpeza }}">{{ _("Samples") }}</a>
       <a href="{{ url_for('lotes_lista') }}" class="{{ 'ativo' if em_lotes }}">{{ _("Batches") }}</a>
+      <a href="{{ url_for('limpeza_pagina') }}" class="{{ 'ativo' if em_limpeza }}">{{ _("Cleaning lots") }}</a>
       <a href="{{ url_for('estatisticas_pagina') }}" class="{{ 'ativo' if request.endpoint == 'estatisticas_pagina' }}">{{ _("Statistics") }}</a>
       {% if eh_admin %}
+      <a href="{{ url_for('projecoes_pagina') }}" class="{{ 'ativo' if request.endpoint == 'projecoes_pagina' }}">{{ _("Projections") }}</a>
       <a href="{{ url_for('usuarios') }}" class="{{ 'ativo' if request.endpoint == 'usuarios' }}">{{ _("Users") }}</a>
       <a href="{{ url_for('auditoria') }}" class="{{ 'ativo' if request.endpoint == 'auditoria' }}">{{ _("Audit log") }}</a>
       {% endif %}
@@ -70,11 +73,6 @@
         {% endfor %}
       </ul>
 
-      <div class="titulo-lateral">Leptons Lab</div>
-      <ul class="arvore">
-        <li><a href="{{ url_for('lotes_limpeza') }}" class="{{ 'ativo' if request.endpoint == 'lotes_limpeza' }}">
-          <span class="rotulo">Cleaning lots</span><span class="n">{{ n_limpezas }}</span></a></li>
-      </ul>
     </aside>
     {% elif arvore is defined %}
     <aside class="lateral">
@@ -115,6 +113,17 @@
       {% for tipo, msg in mensagens %}<div class="aviso-flash {{ tipo }}">{{ msg }}</div>{% endfor %}
       {% endwith %}
       {% block conteudo %}{% endblock %}
+      <script>
+        // ✕ para fechar as mensagens (as que não têm botões nem campos dentro)
+        document.querySelectorAll(".aviso-flash").forEach((m) => {
+          if (m.querySelector("button, input, select, a.botao")) return;
+          const x = document.createElement("button");
+          x.type = "button"; x.className = "fechar-aviso"; x.textContent = "✕";
+          x.title = x.ariaLabel = {{ _("Close")|tojson }};
+          x.addEventListener("click", () => m.remove());
+          m.classList.add("fechavel"); m.append(x);
+        });
+      </script>
       {% if eh_admin %}
       {# janela de exclusão: só um Admin exclui, confirmando com a própria senha #}
       <dialog id="dlg-excluir" class="dialogo pequeno">

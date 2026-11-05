@@ -18,7 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import qrcode
 from PIL import Image, ImageDraw, ImageFont
 
-from . import banco, dados, lotes
+from . import banco, dados, lotes, retirados
 
 # Modo 1 (padrão): URL_BASE_RELATORIO vazio -> o servidor leve na porta abaixo atende o link do QR para
 #                  celulares/computadores na mesma rede, enquanto o programa estiver aberto.
@@ -76,7 +76,16 @@ def coletar_dados_relatorio(tarefa_id):
     d["massas"] = [{"posicao": p, "massa_antes": m.get("massa_antes"), "massa_depois": m.get("massa_depois"),
                     "densidade_massa_ug_cm2": m.get("densidade_massa_ug_cm2")} for p, m in sorted(d["massas"].items())]
     d["im_obs"] = t.get("imersao_observacoes") or ""
+    # filtros retirados desta sample e filtros limpos que ela recebeu: uma nota na coluna Comments
+    d["notas_filtro"] = {n: retirados.nota(r, "destino") for n, r in retirados.reusados(tarefa_id).items()}
+    d["notas_filtro"].update({n: retirados.nota(r) for n, r in retirados.da_amostra(tarefa_id).items()})
     return d
+
+
+def comentario_filtro(d, n):
+    """Comments do filtro n, com a nota de retirado / filtro limpo (se houver)."""
+    f = d["filtros"].get(n, {})
+    return " · ".join(x for x in ((d.get("notas_filtro") or {}).get(n), f.get("comments")) if x)
 
 
 def _signoff_dados(t):
@@ -290,7 +299,7 @@ def _bloco_visual(d):
             "<td class='l'>" + _cx(["OK", "Minor", "Major"], v("uniformity")) + "</td>"
             + "".join("<td class='l'>" + _cx(["Yes", "No"], v(k)) + "</td>"
                       for k in ("stains", "particles", "edge_defects", "finger_defects", "other_defects"))
-            + "<td class='l'>" + _esc(v("comments")) + "</td>"
+            + "<td class='l'>" + _esc(comentario_filtro(d, n)) + "</td>"
             "<td>" + " / ".join(classes) + "</td></tr>"
         )
     cab = "".join("<th>" + h + "</th>" for h in (

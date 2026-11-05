@@ -1,32 +1,76 @@
 {% extends "base.html" %}
-{% block titulo %}Leptons cleaning lots{% endblock %}
+{% block titulo %}{{ _("Cleaning lots") }}{% endblock %}
 {% macro resultado(r) %}{% if r %}<span class="pill {{ {'Approved': 'es-approved', 'Rejected': 'es-rejected', 'Approved with observations': 'es-partial'}.get(r, 'es-empty') }}">{{ r }}</span>{% else %}<span class="suave">–</span>{% endif %}{% endmacro %}
+{% macro amostra(r) %}{% if r.existe %}<a href="{{ url_for('tarefa', tarefa_id=r.id_tarefa) }}" class="mono">Run {{ r.run or '–' }}</a>{% else %}<span class="mono" title="{{ _('sample deleted') }}">Run {{ r.run or '–' }}</span>{% endif %}{% endmacro %}
+{% macro situacao(r) %}
+  {%- if r.situacao == 'aguardando' %}<span class="pill es-partial">{{ _("Waiting for cleaning") }}</span>
+  {%- elif r.situacao == 'reusado' %}<a class="pill es-approved" href="{{ url_for('tarefa', tarefa_id=r.usado_tarefa_id) }}">{{ _("Reused in Run {run} · filter {n}", run=r.usado_run or '–', n=r.usado_filtro) }}</a>
+  {%- elif r.situacao == 'no_lote' %}<span class="pill es-empty">{{ _("In {codigo} · available", codigo=r.codigo_limpeza or '?') }}</span>
+  {%- else %}<span class="pill es-rejected">{{ _("Discarded") }}</span>{% endif %}
+{%- endmacro %}
 {% block conteudo %}
-<div class="trilha">
-  <a href="{{ url_for('lotes_lista') }}">{{ _("All batches") }}</a>
-  <span class="sep">›</span><b>Leptons cleaning lots</b>
-</div>
-
+{% set disponiveis = por_limpeza.values()|sum(start=[])|selectattr('situacao', 'equalto', 'no_lote')|list %}
 <div class="cabecalho">
   <div>
-    <h1>Leptons cleaning lots</h1>
-    <div class="sub">{{ _('Material that went through PTP removal and a new cleaning at Leptons Lab. Each cleaning lot becomes an internal lot (<span class="mono">{prefixo}000X</span>) that can be chosen in the sample form.', prefixo=chegada.PREFIXO_LIMPEZA) }}</div>
+    <h1>{{ _("Cleaning lots") }}</h1>
+    <div class="sub">{{ _('Filters removed in the visual inspection (class A or B) wait here to be cleaned. A cleaning lot (<span class="mono">{prefixo}000X</span>) groups the cleaned filters, and a new sample can use them: Edit sample › Add batch / internal lot… › Leptons cleaning lot, then Cleaned filters….', prefixo=chegada.PREFIXO_LIMPEZA) }}</div>
   </div>
   <div class="acoes">
-    <a class="botao" href="{{ url_for('lotes_limpeza_pdf') }}" target="_blank">{{ _("Print list (PDF)") }}</a>
+    <a class="botao" href="{{ url_for('limpeza_pdf') }}" target="_blank">{{ _("Print list (PDF)") }}</a>
   </div>
+</div>
+
+<div class="resumo">
+  <div class="item"><div class="rot">{{ _("Waiting for cleaning") }}</div><div class="val grande">{{ aguardando|length }}</div>
+    <div class="pequeno suave">{{ _("removed filters not in a cleaning lot yet") }}</div></div>
+  <div class="item"><div class="rot">{{ _("Cleaning lots") }}</div><div class="val grande">{{ limpezas|length }}</div>
+    <div class="pequeno suave">Leptons Lab · {{ chegada.PREFIXO_LIMPEZA }}000X</div></div>
+  <div class="item"><div class="rot">{{ _("Cleaned filters available") }}</div><div class="val grande">{{ disponiveis|length }}</div>
+    <div class="pequeno suave">{{ _("in a cleaning lot, not used in a sample yet") }}</div></div>
+  <div class="item"><div class="rot">{{ _("Discarded filters") }}</div><div class="val grande">{{ descartados|length }}</div>
+    <div class="pequeno suave">{{ _("filters removed and thrown away") }}</div></div>
 </div>
 
 {% if erro %}<div class="aviso-flash erro">{{ erro }}</div>{% endif %}
 
-<form class="cartao" method="post" action="{{ url_for('lotes_limpeza_gravar') }}" autocomplete="off" id="form-limpeza">
+<form class="cartao" method="post" action="{{ url_for('limpeza_gravar') }}" autocomplete="off" id="form-limpeza">
   <input type="hidden" name="limpeza_id" value="{{ f.id or '' }}">
   <h2>{% if f.id %}{{ _("Edit cleaning lot") }} <span class="mono">{{ chegada.PREFIXO_LIMPEZA }}{{ f.num }}</span>{% else %}{{ _("New cleaning lot") }}{% endif %}</h2>
+
+  {# filtros do lote: os que aguardam limpeza (para entrar) e os que já estão nele #}
+  <div class="sub-titulo">{{ _("Removed filters in this lot") }} <span class="contagem-lp" id="lp-contagem"></span></div>
+  <div class="rolagem lista-dialogo alta">
+    <table class="tabela-tarefas" id="lp-filtros">
+      <thead><tr><th></th><th>Run</th><th>PID</th><th class="num">{{ _("Filter") }}</th><th class="centro">{{ _("Class") }}</th>
+        <th>{{ _("Removed") }}</th><th>{{ _("Note") }}</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+      {% for r in no_lote + aguardando %}
+        {% set usado = r.situacao == 'reusado' %}
+        <tr data-run="{{ r.run }}" data-filtro="{{ r.filtro }}">
+          <td><input type="checkbox" name="retirado" value="{{ r.id }}" {{ 'checked' if r.id in f.retirados or usado }} {{ 'disabled' if usado }}
+                     {% if usado %}title="{{ _('Already used in a sample: it stays in the lot') }}"{% endif %}></td>
+          <td>{{ amostra(r) }}</td><td class="mono">{{ r.pid or '–' }}</td><td class="num mono">{{ r.filtro }}</td>
+          <td class="centro classe-{{ r.classe }}">{{ r.classe or '–' }}</td>
+          <td class="mono pequeno">{{ r.data_hora }}{% if r.usuario %} · {{ r.usuario }}{% endif %}</td>
+          <td class="pequeno">{{ r.observacao or '' }}</td>
+          <td>{{ situacao(r) }}</td>
+          <td>{% if r.situacao == 'aguardando' %}<button type="button" class="botao mini-botao" data-desfazer="{{ url_for('desfazer_retirada', retirado_id=r.id) }}"
+                title="{{ _('Put the filter back in its sample (it was removed by mistake)') }}">{{ _("Put back") }}</button>{% endif %}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="9" class="vazio-tabela">{{ _("No removed filter is waiting for cleaning. Remove filters (class A or B) on the sample page, in Visual inspection.") }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="nota">{{ _("Tick the filters that went through this cleaning. Unticked filters stay on the waiting list.") }}</p>
+
   <div class="grade-campos">
     <label>{{ _("Cleaning lot code") }}<span class="codigo-caixa"><span class="mono">{{ chegada.PREFIXO_LIMPEZA }}</span><input name="num" value="{{ f.num }}" class="mono" inputmode="numeric" required></span></label>
     <label>{{ _("Cleaning date") }}<span class="com-hoje"><input name="data" value="{{ f.data }}" placeholder="DD/MM/YYYY" class="data" required><button type="button" class="botao mini-botao" data-hoje>{{ _("Today") }}</button></span></label>
     <label>{{ _("Responsible") }}<input name="resp" value="{{ f.resp }}" required></label>
-    <label>{{ _("Number of filters") }}<input name="filtros" value="{{ f.filtros }}" class="num" inputmode="numeric" required></label>
+    <label>{{ _("Number of filters") }}<input name="filtros" id="lp-numero" value="{{ f.filtros }}" class="num" inputmode="numeric"
+           placeholder="{{ _('= ticked filters') }}"></label>
     <div class="campo-radio"><span>{{ _("PTP removed?") }}</span>
       <span class="seg sim-nao">{% for v in ('Yes', 'No') %}<label><input type="radio" name="ptp" value="{{ v }}"{{ ' checked' if f.ptp == v }}><span class="op-{{ v|lower }}">{{ v|tr }}</span></label>{% endfor %}</span></div>
     <label>{{ _("Result after cleaning") }}<select name="resultado" required>
@@ -34,18 +78,18 @@
       {% if f.resultado and f.resultado not in chegada.RESULTADOS_LIMPEZA %}<option selected>{{ f.resultado }}</option>{% endif %}</select></label>
   </div>
   <div class="grade-campos duas">
-    <label>{{ _("Origin (previous PID / lot)") }}<input name="origem" value="{{ f.origem }}"></label>
+    <label>{{ _("Origin (previous PID / lot)") }}<input name="origem" id="lp-origem" value="{{ f.origem }}" placeholder="{{ _('filled from the ticked filters') }}"></label>
     <label>{{ _("Cleaning procedure") }}<input name="proc" value="{{ f.proc }}"></label>
   </div>
   <label class="bloco-texto">{{ _("Notes") }}<input name="obs" value="{{ f.obs }}"></label>
   <div class="linha-botoes">
     <button class="botao primario" type="submit">{{ _('Update') if f.id else _('Save') }}</button>
     {% if f.id %}
-    <a class="botao" href="{{ url_for('lotes_limpeza') }}">{{ _("New") }}</a>
+    <a class="botao" href="{{ url_for('limpeza_pagina') }}">{{ _("New") }}</a>
     {% if eh_admin %}
-    <button type="button" class="botao perigo" data-excluir="{{ url_for('lotes_limpeza_excluir', limpeza_id=f.id) }}"
+    <button type="button" class="botao perigo" data-excluir="{{ url_for('limpeza_excluir', limpeza_id=f.id) }}"
             data-titulo="{{ _('Delete cleaning lot {codigo}', codigo=chegada.PREFIXO_LIMPEZA ~ f.num) }}"
-            data-texto="{{ _('Depositions that already used it keep the code in their records.') }}">{{ _("Delete") }}</button>
+            data-texto="{{ _('Depositions that already used it keep the code in their records. Its filters not used yet go back to the waiting list.') }}">{{ _("Delete") }}</button>
     {% endif %}
     {% endif %}
   </div>
@@ -53,17 +97,20 @@
 
 <div class="cartao rolagem" style="padding: 6px 8px">
   <table class="tabela-tarefas quebra">
-    <thead><tr><th>ID</th><th>Cleaning lot</th><th>{{ _("Date") }}</th><th>{{ _("Responsible") }}</th><th class="num">{{ _("Filters") }}</th><th>{{ _("Origin") }}</th>
+    <thead><tr><th>ID</th><th>Cleaning lot</th><th>{{ _("Date") }}</th><th>{{ _("Responsible") }}</th><th class="num">{{ _("Filters") }}</th>
+      <th class="num" title="{{ _('cleaned filters of the lot not used in a sample yet') }}">{{ _("Available") }}</th><th>{{ _("Origin") }}</th>
       <th>{{ _("PTP removed") }}</th><th>{{ _("Procedure") }}</th><th>{{ _("Result") }}</th><th>{{ _("Notes") }}</th><th>Samples</th></tr></thead>
     <tbody>
     {% for l in limpezas %}
-      {% set link = url_for('lotes_limpeza', edit=l.id) %}
+      {% set link = url_for('limpeza_pagina', edit=l.id) %}
+      {% set controlados = por_limpeza.get(l.id, []) %}
       <tr onclick="location.href='{{ link }}'" class="{{ 'selecionada' if f.id == l.id }}" title="{{ _('Click to edit') }}">
         <td class="id"><a href="{{ link }}">{{ l.id }}</a></td>
         <td class="mono"><b>{{ l.codigo or '–' }}</b></td>
         <td class="mono">{{ l.data or '–' }}</td>
         <td>{{ l.responsavel or '–' }}</td>
         <td class="num mono">{{ l.filtros or '–' }}</td>
+        <td class="num mono">{% if controlados %}{{ controlados|selectattr('situacao', 'equalto', 'no_lote')|list|length }}/{{ controlados|length }}{% else %}<span class="suave" title="{{ _('no removed filter recorded in this lot') }}">–</span>{% endif %}</td>
         <td>{{ l.origem or '–' }}</td>
         <td>{% if l.ptp == 'Yes' %}<span class="sim">{{ 'Yes'|tr }}</span>{% elif l.ptp == 'No' %}<span class="nao">{{ 'No'|tr }}</span>{% else %}–{% endif %}</td>
         <td>{{ l.proc or '–' }}</td>
@@ -72,16 +119,87 @@
         <td>{% for a in usado[l.id] %}<a class="pill st-{{ a.status|lower|replace(' ', '-') }}" href="{{ url_for('tarefa', tarefa_id=a.id) }}" onclick="event.stopPropagation()" title="{{ a.pid or _('no PID yet') }}">Run {{ a.numero or '–' }}</a> {% else %}<span class="suave">–</span>{% endfor %}</td>
       </tr>
     {% else %}
-      <tr><td colspan="11" class="vazio-tabela">{{ _("No cleaning lot registered yet.") }}</td></tr>
+      <tr><td colspan="12" class="vazio-tabela">{{ _("No cleaning lot registered yet.") }}</td></tr>
     {% endfor %}
     </tbody>
   </table>
 </div>
+
+<details class="cartao" {{ 'open' if descartados and descartados|length <= 10 }}>
+  <summary>{{ _("Discarded filters") }} <span class="pill es-rejected">{{ descartados|length }}</span></summary>
+  <div class="dentro">
+    <table class="tabela-tarefas">
+      <thead><tr><th>Run</th><th>PID</th><th class="num">{{ _("Filter") }}</th><th class="centro">{{ _("Class") }}</th>
+        <th>{{ _("Removed") }}</th><th>{{ _("Note") }}</th><th></th></tr></thead>
+      <tbody>
+      {% for r in descartados %}
+        <tr><td>{{ amostra(r) }}</td><td class="mono">{{ r.pid or '–' }}</td><td class="num mono">{{ r.filtro }}</td>
+          <td class="centro classe-{{ r.classe }}">{{ r.classe or '–' }}</td>
+          <td class="mono pequeno">{{ r.data_hora }}{% if r.usuario %} · {{ r.usuario }}{% endif %}</td>
+          <td class="pequeno">{{ r.observacao or '' }}</td>
+          <td><form method="post" action="{{ url_for('desfazer_retirada', retirado_id=r.id) }}">
+            <input type="hidden" name="voltar" value="{{ request.full_path }}">
+            <button class="botao mini-botao" title="{{ _('Put the filter back in its sample (it was removed by mistake)') }}">{{ _("Put back") }}</button></form></td></tr>
+      {% else %}
+        <tr><td colspan="7" class="vazio-tabela">{{ _("No filter discarded.") }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</details>
 
 <script>
   document.querySelectorAll("[data-hoje]").forEach((b) => b.addEventListener("click", () => {
     const d = new Date(), p = (x) => String(x).padStart(2, "0");
     b.previousElementSibling.value = `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`;
   }));
+  // "Put back" dentro do formulário do lote: um formulário à parte (Enter nos campos continua gravando o lote)
+  document.querySelectorAll("[data-desfazer]").forEach((b) => b.addEventListener("click", () => {
+    const f = document.createElement("form");
+    f.method = "post";
+    f.action = b.dataset.desfazer;
+    const v = document.createElement("input");
+    v.type = "hidden"; v.name = "voltar"; v.value = location.pathname + location.search;
+    f.appendChild(v);
+    document.body.appendChild(f);
+    f.submit();
+  }));
+  // nº de filtros e origem acompanham os filtros marcados, enquanto ninguém digitou outro valor
+  (function () {
+    const caixas = [...document.querySelectorAll('#lp-filtros input[name="retirado"]')];
+    const numero = document.getElementById("lp-numero"), origem = document.getElementById("lp-origem");
+    const faixas = (ns) => {
+      ns = [...ns].sort((a, b) => a - b);
+      const partes = [];
+      for (let i = 0; i < ns.length; i++) {
+        let j = i;
+        while (j + 1 < ns.length && ns[j + 1] === ns[j] + 1) j++;
+        partes.push(i === j ? String(ns[i]) : ns[i] + "–" + ns[j]);
+        i = j;
+      }
+      return partes.join(", ");
+    };
+    const textoOrigem = (marcadas) => {
+      const porRun = new Map();
+      marcadas.forEach((c) => {
+        const tr = c.closest("tr"), run = tr.dataset.run || "–";
+        if (!porRun.has(run)) porRun.set(run, []);
+        porRun.get(run).push(+tr.dataset.filtro);
+      });
+      return [...porRun].map(([run, ns]) => `Run ${run} (filter${ns.length > 1 ? "s" : ""} ${faixas(ns)})`).join("; ");
+    };
+    let autoNumero = !numero.value || numero.value === String(caixas.filter((c) => c.checked).length);
+    let autoOrigem = !origem.value || origem.value === textoOrigem(caixas.filter((c) => c.checked));
+    numero.addEventListener("input", () => { autoNumero = !numero.value; });
+    origem.addEventListener("input", () => { autoOrigem = !origem.value; });
+    const atualizar = () => {
+      const marcadas = caixas.filter((c) => c.checked);
+      document.getElementById("lp-contagem").textContent = caixas.length ? T("{n} ticked", { n: marcadas.length }) : "";
+      if (autoNumero) numero.value = marcadas.length ? marcadas.length : "";
+      if (autoOrigem) origem.value = textoOrigem(marcadas);
+    };
+    caixas.forEach((c) => c.addEventListener("change", atualizar));
+    document.getElementById("lp-contagem").textContent = caixas.length ? T("{n} ticked", { n: caixas.filter((c) => c.checked).length }) : "";
+  })();
 </script>
 {% endblock %}
