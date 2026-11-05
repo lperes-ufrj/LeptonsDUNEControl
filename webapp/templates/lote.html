@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block titulo %}Batch {{ l.lote_geral or l.tracking_id or l.id }}{% endblock %}
+{% macro sim_nao(v, bom='Yes') %}{% if v in ('Yes', 'No') %}<span class="{{ 'sim' if v == bom else 'nao' }}">{{ v|tr }}</span>{% else %}<span class="suave">–</span>{% endif %}{% endmacro %}
+{% macro resultado(r, classe='') %}{% if r %}<span class="pill {{ classe }} {{ {'Approved': 'es-approved', 'Rejected': 'es-rejected', 'Approved with observations': 'es-partial'}.get(r, 'es-empty') }}">{{ r }}</span>{% else %}<span class="suave">–</span>{% endif %}{% endmacro %}
+{% macro amostras(lista) %}{% for a in lista %}<a class="pill st-{{ a.status|lower|replace(' ', '-') }}" href="{{ url_for('tarefa', tarefa_id=a.id) }}" title="{{ a.pid or _('no PID yet') }} · {{ a.status }}">Run {{ a.numero or '–' }}</a> {% else %}<span class="suave">–</span>{% endfor %}{% endmacro %}
+{% block conteudo %}
+{% set n_caixas = (l.numero_caixas_menores or '0')|int(0) %}
+{% set n_int = l.internos|length %}
+<div class="trilha">
+  <a href="{{ url_for('lotes_lista') }}">{{ _("All batches") }}</a>
+  <span class="sep">›</span><b>{{ l.lote_geral or l.tracking_id or 'ID ' ~ l.id }}</b>
+</div>
+
+<div class="cabecalho">
+  <div>
+    <h1>{{ l.lote_geral or '–' }} {{ resultado(l.resultado_inspecao, 'grande') }}</h1>
+    <div class="sub"><span class="mono">{{ l.tracking_id or _('no tracking ID') }}</span> · {{ _("record ID") }} {{ l.id }}
+      {% if l.data_hora_registro %} · {{ _("last saved") }} {{ l.data_hora_registro }}{% endif %}</div>
+  </div>
+  <div class="acoes">
+    <a class="botao primario" href="{{ url_for('lote_editar', lote_id=l.id) }}">{{ _("Edit batch") }}</a>
+    {% if l.lote_geral %}<a class="botao" href="{{ url_for('lista', lote=l.lote_geral) }}">{{ _("Samples from this batch") }}</a>{% endif %}
+  </div>
+</div>
+
+<div class="barra-acoes">
+  <a class="botao" href="{{ url_for('lote_pdf', lote_id=l.id) }}" target="_blank">{{ _("Print report (PDF)") }}</a>
+  {% if arquivo_existe %}<a class="botao" href="{{ url_for('lote_arquivo', lote_id=l.id) }}" target="_blank">{{ _("Open supplier control file") }}</a>{% endif %}
+  {% if eh_admin %}
+  <button type="button" class="botao perigo direita" data-excluir="{{ url_for('lote_excluir', lote_id=l.id) }}"
+          data-titulo="{{ _('Delete batch {lote}', lote=l.lote_geral or l.tracking_id or l.id) }}"
+          data-texto="{{ _('Batch {lote} (record ID {id}) and its {n} internal lot(s) will be deleted.', lote=l.lote_geral or '–', id=l.id, n=n_int) }}{% if n_amostras %} {{ _('{n} deposition sample(s) used it: they keep the batch codes in their records.', n=n_amostras) }}{% endif %}">{{ _("Delete batch") }}</button>
+  {% endif %}
+</div>
+
+<div class="resumo">
+  <div class="item"><div class="rot">{{ _("Total filters") }}</div><div class="val mono">{{ l.total_filtros or '–' }}</div></div>
+  <div class="item"><div class="rot">{{ _("Small boxes") }}</div>
+    <div class="val"><span class="mono">{{ l.numero_caixas_menores or '–' }}</span>
+      <span class="pequeno suave">× {{ l.capacidade_caixa_menor or '–' }} {{ _('filters per box') }}</span></div></div>
+  <div class="item"><div class="rot">{{ _("Internal lots registered") }}</div>
+    <div class="val"><span class="mono {{ 'sim' if n_int >= n_caixas and n_caixas else 'nao' }}">{{ n_int }}/{{ n_caixas }}</span></div>
+    <div class="barra"><span style="width: {{ (100 * n_int / n_caixas)|round if n_caixas else 0 }}%"></span></div></div>
+  <div class="item"><div class="rot">{{ _("Deposition samples") }}</div><div class="val mono">{{ n_amostras or '–' }}</div></div>
+</div>
+
+<div class="cartao">
+  <h2>{{ _("General OPTO batch information") }}</h2>
+  <dl class="chaves">
+    <dt>OPTO batch</dt><dd>{{ l.lote_geral|ou_traco }}</dd>
+    <dt>Tracking ID</dt><dd>{{ l.tracking_id|ou_traco }}</dd>
+    <dt>{{ _("Supplier / company") }}</dt><dd>{{ l.fornecedor|ou_traco }}</dd>
+    <dt>{{ _("Arrival date") }}</dt><dd>{{ l.data_recebimento|ou_traco }}</dd>
+    <dt>{{ _("Responsible") }}</dt><dd>{{ l.responsavel|ou_traco }}</dd>
+    <dt>{{ _("Recorded") }}</dt><dd>{{ l.data_hora_registro|ou_traco }}</dd>
+    {% if l.lote_fornecedor %}<dt>{{ _("Supplier batch (old records)") }}</dt><dd class="largo">{{ l.lote_fornecedor }}</dd>{% endif %}
+  </dl>
+</div>
+
+<div class="cartao">
+  <div class="linha-secao"><h2 style="margin: 0">{{ _("Internal lots (small boxes)") }}</h2>
+    <span class="direita">{{ _("filters in the registered boxes:") }} <b class="mono">{{ l.soma_filtros }}</b></span></div>
+  <div class="rolagem">
+    <table>
+      <thead><tr><th>{{ _("Box") }}</th><th>OPTO batch</th><th>Internal lot</th><th class="num">{{ _("Filters") }}</th><th>{{ _("Notes") }}</th><th>{{ _("Deposition samples") }}</th></tr></thead>
+      <tbody>
+      {% for it in l.internos %}
+        <tr>
+          <td class="mono"><b>{{ '%02d'|format(it.caixa or 0) }}</b></td>
+          <td class="mono suave">{{ l.lote_geral or '–' }}</td>
+          <td class="mono"><b>{{ it.codigo or '–' }}</b></td>
+          <td class="num mono">{{ it.filtros or '–' }}</td>
+          <td>{{ it.obs or '' }}</td>
+          <td>{{ amostras(por_interno.get(it.id, [])) }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="6" class="vazio-tabela">{{ _("No internal lot registered – use <b>Edit batch</b> to register the small boxes.") }}</td></tr>
+      {% endfor %}
+      {% if por_interno.get(None) %}
+        <tr><td colspan="5" class="suave">{{ _("Whole batch (no internal lot chosen)") }}</td><td>{{ amostras(por_interno[None]) }}</td></tr>
+      {% endif %}
+      </tbody>
+    </table>
+  </div>
+  {% if n_int < n_caixas %}<p class="nota nao">{{ _("{n} small box(es) without an internal lot code: they cannot be chosen for deposition.", n=n_caixas - n_int) }}</p>{% endif %}
+</div>
+
+<div class="dupla">
+  <div class="cartao">
+    <h2>{{ _("Substrate information") }}</h2>
+    <dl class="chaves duas">
+      <dt>Material</dt><dd>{{ l.material|ou_traco }}</dd>
+      <dt>{{ _("Dimensions") }}</dt><dd>{{ l.dimensoes|ou_traco }}</dd>
+      <dt>{{ _("Thickness") }}</dt><dd>{{ l.espessura|ou_traco }}</dd>
+      <dt>{{ _("Finishing type") }}</dt><dd>{{ l.tipo_acabamento|ou_traco }}</dd>
+    </dl>
+  </div>
+  <div class="cartao">
+    <h2>{{ _("Arrival inspection") }}</h2>
+    <dl class="chaves duas">
+      <dt>{{ _("Broken filters?") }}</dt><dd>{{ sim_nao(l.filtros_quebrados, 'No') }}</dd>
+      <dt>{{ _("Quantity matches supplier?") }}</dt><dd>{{ sim_nao(l.quantidade_confere) }}</dd>
+      <dt>{{ _("Cleaning procedure verified?") }}</dt><dd>{{ sim_nao(l.procedimento_limpeza) }}</dd>
+      <dt>{{ _("Inspection result") }}</dt><dd>{{ resultado(l.resultado_inspecao) }}</dd>
+    </dl>
+  </div>
+</div>
+
+<div class="cartao">
+  <h2>{{ _("Traceability and notes") }}</h2>
+  <dl class="chaves">
+    <dt>{{ _("Supplier control file") }}</dt>
+    <dd class="largo">{% if l.arquivo_controle %}{% if arquivo_existe %}<a href="{{ url_for('lote_arquivo', lote_id=l.id) }}" target="_blank">{{ l.arquivo_controle|basename }}</a>{% else %}{{ l.arquivo_controle|basename }} <span class="nao pequeno">{{ _("file not found on this computer") }}</span>{% endif %}
+      <div class="suave pequeno">{{ l.arquivo_controle }}</div>{% else %}–{% endif %}</dd>
+    <dt>{{ _("Observations") }}</dt><dd class="largo texto">{{ l.observacoes|ou_traco }}</dd>
+  </dl>
+</div>
+{% endblock %}

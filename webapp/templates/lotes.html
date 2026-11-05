@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block titulo %}{{ _("Batches") }}{% endblock %}
+{% macro resultado(r) %}{% if r %}<span class="pill {{ {'Approved': 'es-approved', 'Rejected': 'es-rejected', 'Approved with observations': 'es-partial'}.get(r, 'es-empty') }}">{{ r }}</span>{% else %}<span class="suave">–</span>{% endif %}{% endmacro %}
+{% block conteudo %}
+<div class="trilha">
+  <a href="{{ url_for('lotes_lista') }}">{{ _("All batches") }}</a>
+  {% if res %}<span class="sep">›</span><b>{{ res }}</b>{% endif %}
+</div>
+
+<div class="cabecalho">
+  <div>
+    <h1>{{ res or 'OPTO batches' }}</h1>
+    <div class="sub">
+      {% if lista_lotes|length == lat_lotes|length %}{{ _("{n} batch", n=1) if lat_lotes|length == 1 else _("{n} batches", n=lat_lotes|length) }}{% else %}{{ _("showing {n} of {total} batches", n=lista_lotes|length, total=lat_lotes|length) }}{% endif %}
+      · {{ _('general batches received from OPTO, each split in small boxes (internal lots <span class="mono">DUNE-CX-000X</span>)') }}
+      {% if q %} · {{ _("search") }} <span class="mono">“{{ q }}”</span> · <a href="{{ url_for('lotes_lista', result=res or None) }}">{{ _("show all") }}</a>{% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="barra-acoes">
+  <a class="botao primario" href="{{ url_for('lote_novo') }}">＋ {{ _("New batch") }}</a>
+  <a class="botao" href="{{ url_for('lotes_csv') }}">Export CSV</a>
+  <form method="post" action="{{ url_for('backup_agora') }}"><button class="botao">{{ _("Backup now") }}</button></form>
+</div>
+
+<div class="cartao rolagem" style="padding: 6px 8px">
+  <table class="tabela-tarefas quebra">
+    <thead>
+      <tr>
+        <th>ID</th><th>Tracking ID</th><th>OPTO batch</th><th>{{ _("Supplier") }}</th><th class="num">{{ _("Total filters") }}</th>
+        <th title="{{ _('internal lots registered / small boxes') }}">Internal lots</th><th>{{ _("Arrival date") }}</th><th>{{ _("Responsible") }}</th><th>{{ _("Inspection") }}</th>
+        <th class="num">Samples</th><th>{{ _("Record date/time") }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for l in lista_lotes %}
+      {% set link = url_for('lote', lote_id=l.id) %}
+      {% set n_caixas = (l.numero_caixas_menores or '0')|int(0) %}
+      <tr onclick="location.href='{{ link }}'">
+        <td class="id"><a href="{{ link }}">{{ l.id }}</a></td>
+        <td class="mono">{{ l.tracking_id or '–' }}</td>
+        <td class="mono"><b>{{ l.lote_geral or '–' }}</b></td>
+        <td>{{ l.fornecedor or '–' }}</td>
+        <td class="num mono">{{ l.total_filtros or '–' }}</td>
+        <td><span class="mono {{ 'sim' if l.n_internos >= n_caixas and n_caixas else 'nao' }}">{{ l.n_internos }}/{{ n_caixas }}</span></td>
+        <td class="mono">{{ l.data_recebimento or '–' }}</td>
+        <td>{{ l.responsavel or '–' }}</td>
+        <td>{{ resultado(l.resultado_inspecao) }}</td>
+        <td class="num mono {{ 'suave' if not n_amostras.get(l.id) }}">{{ n_amostras.get(l.id) or '—' }}</td>
+        <td class="suave pequeno">{{ l.data_hora_registro or '–' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="11" class="vazio-tabela">{% if q or res %}{{ _("No batch matches this filter.") }}{% else %}{{ _("No batch registered yet – click <b>New batch</b>.") }}{% endif %}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+{% block titulo %}Run {{ d.numero or '–' }}{% endblock %}
+{% macro sim_nao(v) %}{% if v == 'Yes' %}<span class="sim">{{ 'Yes'|tr }}</span>{% elif v == 'No' %}<span class="nao">{{ 'No'|tr }}</span>{% else %}<span class="suave">–</span>{% endif %}{% endmacro %}
+{% macro quem_quando(data, pessoa) %}{{ [data, pessoa]|select|join(' · ') }}{% endmacro %}
+{% macro estado(e) %}<span class="pill es-{{ e }}">{{ TXT_ESTADO[e]|tr }}</span>{% endmacro %}
+{% block conteudo %}
+{% set l0 = d.lotes[0] if d.lotes else none %}
+<div class="trilha">
+  <a href="{{ url_for('lista') }}">{{ _("All samples") }}</a>
+  {% if l0 %}
+    <span class="sep">›</span><a href="{{ url_for('lista', lote=l0.opto) }}">{{ l0.opto or _('No batch yet') }}</a>
+    {% if l0.interno %}<span class="sep">›</span><a href="{{ url_for('lista', lote=l0.opto, interno=l0.interno) }}">{{ l0.interno }}</a>{% endif %}
+  {% else %}
+    <span class="sep">›</span><a href="{{ url_for('lista', lote='') }}">{{ _('No batch yet') }}</a>
+  {% endif %}
+  <span class="sep">›</span><b>Run {{ d.numero or '–' }}</b>
+</div>
+
+<div class="cabecalho">
+  <div>
+    <h1>Run {{ d.numero or '–' }} <span class="pill grande st-{{ d.status|lower|replace(' ', '-') }}">{{ d.status }}</span></h1>
+    <div class="sub"><span class="mono">{{ t.codigo_tarefa or _('no PID yet') }}</span> · <span class="mono">{{ c.run_evaporation or _('no run') }}</span>
+      {% if t.data_hora_registro %} · {{ _("last saved") }} {{ t.data_hora_registro }}{% endif %}</div>
+  </div>
+  <div class="acoes">
+    {% set assinada = (t.qa_signoff_por or '').strip() %}
+    {% if not assinada or eh_admin %}
+    <a class="botao primario" href="{{ url_for('editar_tarefa', tarefa_id=d.id) }}"
+       {% if assinada %}title="{{ _('Signed off: saving changes removes the Final QA sign-off') }}"{% endif %}>{{ _("Edit sample") }}</a>
+    {% else %}
+    <span class="botao desativado" title="{{ _('Signed off (Final QA) – only an Admin can change a completed sample') }}">🔒 {{ _("Edit sample") }}</span>
+    {% endif %}
+    <a class="botao" href="{{ url_for('revisar', tarefa_id=d.id) }}">{{ _("Review sample") }}</a>
+    {% if anterior %}<a class="botao" href="{{ url_for('tarefa', tarefa_id=anterior.id) }}">← Run {{ anterior.numero or '–' }}</a>{% endif %}
+    {% if proxima %}<a class="botao" href="{{ url_for('tarefa', tarefa_id=proxima.id) }}">Run {{ proxima.numero or '–' }} →</a>{% endif %}
+  </div>
+</div>
+
+<div class="barra-acoes">
+  <a class="botao" href="{{ url_for('relatorio_html', tarefa_id=d.id) }}" target="_blank">{{ _("Open report") }}</a>
+  <a class="botao" href="{{ url_for('relatorio_pdf', tarefa_id=d.id) }}" target="_blank">{{ _("Print report (PDF)") }}</a>
+  <a class="botao" href="{{ url_for('qr', tarefa_id=d.id) }}">{{ _("Generate QR Code") }}</a>
+  <a class="botao" href="{{ url_for('exportar_json', tarefa_id=d.id) }}">{{ _("Export sample (JSON)") }}</a>
+  {% if eh_admin %}
+  <button type="button" class="botao perigo direita" data-excluir="{{ url_for('excluir_tarefa', tarefa_id=d.id) }}"
+          data-titulo="{{ _('Delete sample ID {n}', n=d.numero or '–') }}"
+          data-texto="{{ _('Sample {pid} and everything recorded for it (deposition, visual inspection, cryogenic immersion, optical efficiency, review) will be deleted.', pid=t.codigo_tarefa or _('(no PID)')) }}">{{ _("Delete sample") }}</button>
+  {% endif %}
+</div>
+
+{% set completos, classes = d.visual[0], d.visual[1] %}
+<div class="resumo">
+  <div class="item"><div class="rot">Visual inspection</div>
+    <div class="val"><span class="mono">{{ completos }}/{{ N_FILTROS }}</span>
+      <span class="pequeno"><span class="classe-A">A {{ classes.A }}</span> · <span class="classe-B">B {{ classes.B }}</span> · <span class="classe-C">C {{ classes.C }}</span></span></div>
+    <div class="barra"><span style="width: {{ (100 * completos / N_FILTROS)|round }}%"></span></div></div>
+  <div class="item"><div class="rot">Cryogenic immersion</div><div class="val">{{ estado(d.estado_imersao) }}</div></div>
+  <div class="item"><div class="rot">Optical efficiency</div><div class="val">{{ estado(d.estado_eficiencia) }}</div></div>
+  <div class="item"><div class="rot">{{ _("Batch decision") }}</div>
+    <div class="val"><span class="pill es-{{ {'Approved': 'approved', 'Rejected': 'rejected'}.get(d.decisao, 'partial') }}">{{ d.decisao }}</span></div></div>
+</div>
+
+{% if d.pendencias %}
+<details class="cartao" open>
+  <summary>{{ _("Missing information") }} <span class="pill st-incomplete">{{ d.pendencias|length }}</span>
+    <span class="direita suave pequeno">{{ _("needed before the sample can be reviewed") }}</span></summary>
+  <div class="dentro"><ul class="lista-pendencias">{% for p in d.pendencias %}<li>{{ p }}</li>{% endfor %}</ul></div>
+</details>
+{% endif %}
+
+<div class="cartao">
+  <div class="linha-secao"><span>Deposition</span><span class="direita">{{ _("ID = run number") }}</span></div>
+  <dl class="chaves">
+    <dt>Run</dt><dd>{{ c.run_evaporation|ou_traco }}</dd>
+    <dt>{{ _("Deposition date") }}</dt><dd>{{ t.data_inicio|ou_traco }}</dd>
+    <dt>PID</dt><dd>{{ t.codigo_tarefa|ou_traco }}</dd>
+    <dt>{{ _("Responsible") }}</dt><dd>{{ t.responsavel|ou_traco }}</dd>
+    <dt>Box PID</dt><dd>{{ c.box_pid|ou_traco }}</dd>
+    <dt>{{ _("Position") }}</dt><dd>{{ t.position_range|ou_traco }}</dd>
+    <dt>Control PIDs</dt>
+    <dd class="largo">P02 {{ c.pid_p02|ou_traco }} &nbsp;·&nbsp; P03 {{ c.pid_p03|ou_traco }} &nbsp;·&nbsp; P14 {{ c.pid_p14|ou_traco }}</dd>
+    <dt>{{ _("Filter type") }}</dt><dd>{{ t.descricao|ou_traco }}</dd>
+    <dt>PTP</dt><dd>{{ t.massa_ptp_g|num }}{% if t.massa_ptp_g %} g{% endif %} &nbsp;·&nbsp; batch {{ t.lote_ptp|ou_traco }}</dd>
+    <dt>{{ _("Batches") }}</dt>
+    <dd class="largo">{% for l in d.lotes %}{% if d.lotes|length > 1 %}<span class="chip-origem cor-{{ loop.index0 % 6 }}">{% endif %}{{ l.opto or '–' }}{% if l.interno %} › {{ l.interno }}{% endif %}{% if d.lotes|length > 1 %}</span>{% endif %}{% if l.empresa %} <span class="suave">({{ l.empresa }}{% if l.chegada %}, {{ _("arrived") }} {{ l.chegada }}{% endif %})</span>{% endif %}
+      {%- if d.lotes|length > 1 %} · {% if l.filtros_origem %}{{ _("filters") }} <b class="mono">{{ l.filtros_origem|faixas }}</b> ({{ l.filtros_origem|length }}){% else %}<span class="suave">{{ _("no filter assigned") }}</span>{% endif %}{% endif %}{% if not loop.last %}<br>{% endif %}{% else %}–{% endfor %}
+      {%- if d.sem_origem %}<div class="nao pequeno">{{ _("{n} of {total} filters without origin – use <b>Edit sample › Filter origin…</b>", n=d.sem_origem, total=dados.N_FILTROS) }}</div>{% endif %}</dd>
+    {% if t.observacoes %}<dt>{{ _("Observations") }}</dt><dd class="largo texto">{{ t.observacoes }}</dd>{% endif %}
+    {% if anexos %}<dt>{{ _("Attached files") }}</dt><dd class="largo texto">
+      {% for a in anexos %}<a href="{{ url_for('anexo', tarefa_id=d.id, file=a) }}" target="_blank">{{ a|basename }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</dd>{% endif %}
+  </dl>
+</div>
+
+<details class="cartao" open>
+  <summary>Mass control by position <span class="direita suave pequeno">{{ _("area {a} cm² · density = (after − before) / area", a=dados.AREA_FILTRO_CM2) }}</span></summary>
+  <div class="dentro">
+    <table>
+      <thead><tr><th>{{ _("Position") }}</th><th class="num">Mass before <span class="unid">(g)</span></th><th class="num">Mass after <span class="unid">(g)</span></th><th class="num">{{ _("Density") }} <span class="unid">(µg/cm²)</span></th></tr></thead>
+      <tbody>
+      {% for pos, nome in dados.POSICOES.items() %}
+        {% set m = d.massas.get(pos, {}) %}
+        {% set dens = m.densidade_massa_ug_cm2 if m.densidade_massa_ug_cm2 else dados.densidade(m.massa_antes, m.massa_depois) %}
+        <tr><td>{{ pos }} – {{ nome }}</td><td class="num mono">{{ m.massa_antes|num }}</td>
+          <td class="num mono">{{ m.massa_depois|num }}</td><td class="num mono">{{ dens|num(2) }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</details>
+
+<details class="cartao" id="visual" {{ 'open' if d.visual[2] or retirados_amostra }}>
+  <summary>Visual inspection <span class="pill es-{{ 'approved' if completos == N_FILTROS else 'partial' if d.visual[2] else 'empty' }}">{{ completos }}/{{ N_FILTROS }} {{ _("classified") }}</span>
+    {% if retirados_amostra %}<span class="pill es-rejected">{{ _("{n} removed", n=retirados_amostra|length) }}</span>{% endif %}
+    <span class="direita suave pequeno">{{ quem_quando(c.data_inspecao, c.operador) }}</span></summary>
+  <div class="dentro">
+    <dl class="chaves" style="margin-bottom: 14px">
+      <dt>{{ _("Inspection date") }}</dt><dd>{{ c.data_inspecao|ou_traco }}</dd>
+      <dt>{{ _("Performed by") }}</dt><dd>{{ c.operador|ou_traco }}</dd>
+      <dt>Inspector</dt><dd>{{ c.inspector|ou_traco }}</dd>
+      <dt>{{ _("Supervisor review") }}</dt><dd>{{ c.supervisor|ou_traco }}{% if c.data_revisao %} · {{ c.data_revisao }}{% endif %}</dd>
+      {% if c.notes %}<dt>{{ _("Notes") }}</dt><dd class="largo texto">{{ c.notes }}</dd>{% endif %}
+    </dl>
+    <div class="rolagem"><table>
+      <thead><tr><th class="centro">{{ _("Filter") }}</th>{% for _col, titulo in dados.COLUNAS_INSPECAO %}<th class="centro">{{ titulo }}</th>{% endfor %}
+        <th>{{ _("Comments") }}</th><th class="centro">{{ _("Class") }}</th>
+        <th title="{{ _('Filters classified A or B can be removed: discarded, or sent to cleaning and reused in a new sample') }}">{{ _("Removal") }}</th></tr></thead>
+      <tbody>
+      {% for n in range(1, N_FILTROS + 1) %}
+        {% set f = d.filtros.get(n, {}) %}
+        {% set r = retirados_amostra.get(n) %}
+        {% set u = reusados.get(n) %}
+        <tr class="{{ 'retirado' if r }}"><td class="centro mono">{{ n }}
+            {% if u %}<a class="reuso" href="{{ url_for('tarefa', tarefa_id=u.id_tarefa) if u.existe else url_for('limpeza_pagina') }}"
+               title="{{ _('Cleaned filter from cleaning lot {codigo}', codigo=u.codigo_limpeza or '?') }}">♻ Run {{ u.run or '–' }} · {{ u.filtro }}</a>{% endif %}</td>
+          {% for col, _titulo in dados.COLUNAS_INSPECAO %}<td class="centro">{{ f[col]|ou_traco }}</td>{% endfor %}
+          <td class="pequeno">{{ f.comments or '' }}</td>
+          <td class="centro classe-{{ f.classification }}">{{ f.classification|ou_traco }}</td>
+          <td class="retirada">
+            {%- if r %}
+              {%- if r.situacao == 'descartado' %}<span class="pill es-rejected">{{ _("Discarded") }}</span>
+              {%- elif r.situacao == 'aguardando' %}<a class="pill es-partial" href="{{ url_for('limpeza_pagina') }}">{{ _("Waiting for cleaning") }}</a>
+              {%- elif r.situacao == 'no_lote' %}<a class="pill es-empty" href="{{ url_for('limpeza_pagina', edit=r.limpeza_id) }}">{{ _("Cleaned · {codigo}", codigo=r.codigo_limpeza or '?') }}</a>
+              {%- else %}<a class="pill es-approved" href="{{ url_for('tarefa', tarefa_id=r.usado_tarefa_id) }}">{{ _("Reused in Run {run} · filter {n}", run=r.usado_run or '–', n=r.usado_filtro) }}</a>{% endif %}
+              <span class="info-retirada" title="{{ _('Removed') }} {{ r.data_hora }}{% if r.usuario %} · {{ r.usuario }}{% endif %}{% if r.observacao %} – {{ r.observacao }}{% endif %}">ⓘ</span>
+              {%- if r.situacao in ('descartado', 'aguardando') %}
+              <form method="post" action="{{ url_for('desfazer_retirada', retirado_id=r.id) }}" class="em-linha"
+                    onsubmit='return confirm({{ _("Put filter {n} back in this sample?", n=n)|tojson }})'>
+                <button class="botao mini-botao" title="{{ _('Put the filter back in its sample (it was removed by mistake)') }}">{{ _("Put back") }}</button></form>
+              {%- endif %}
+            {%- elif f.classification in classes_retiraveis %}
+              <button type="button" class="botao mini-botao" data-retirar="{{ url_for('retirar_filtro', tarefa_id=d.id, filtro=n) }}"
+                      data-filtro="{{ n }}" data-classe="{{ f.classification }}">{{ _("Remove…") }}</button>
+            {%- endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+  </div>
+</details>
+
+<details class="cartao" {{ 'open' if d.estado_imersao != 'empty' }}>
+  <summary>Cryogenic immersion {{ estado(d.estado_imersao) }}
+    <span class="direita suave pequeno">{{ quem_quando(t.imersao_data, t.imersao_operador) }}</span></summary>
+  <div class="dentro">
+    <dl class="chaves" style="margin-bottom: 14px">
+      <dt>{{ _("Test date") }}</dt><dd>{{ t.imersao_data|ou_traco }}</dd>
+      <dt>{{ _("Performed by") }}</dt><dd>{{ t.imersao_operador|ou_traco }}</dd>
+      <dt>{{ _("Supervisor review") }}</dt><dd class="largo">{{ t.imersao_supervisor|ou_traco }}{% if t.imersao_data_revisao %} · {{ t.imersao_data_revisao }}{% endif %}</dd>
+      {% if t.imersao_observacoes %}<dt>{{ _("Observations") }}</dt><dd class="largo texto">{{ t.imersao_observacoes }}</dd>{% endif %}
+    </dl>
+    <div class="dupla">
+      <div>
+        <div class="sub-titulo">{{ _("Mass of the control substrates · max. loss {n} %", n=dados.LIMITE_PERDA_PCT) }}</div>
+        <table>
+          <thead><tr><th>Sample</th><th class="num">{{ _("Before") }} <span class="unid">(g)</span></th><th class="num">{{ _("After") }} <span class="unid">(g)</span></th><th class="num">Δ <span class="unid">(%)</span></th><th class="centro">OK</th></tr></thead>
+          <tbody>
+          {% for a in dados.AMOSTRAS %}{% set m = d.im_massas.get(a, {}) %}
+            <tr><td class="mono">{{ a }}</td><td class="num mono">{{ m.massa_antes|num }}</td><td class="num mono">{{ m.massa_depois|num }}</td>
+              <td class="num mono">{{ m.diferenca_pct|num }}</td><td class="centro">{{ sim_nao(m.aprovado) }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div>
+        <div class="sub-titulo">Post-immersion inspection</div>
+        <table>
+          <thead><tr><th>Item</th><th class="centro">{{ _("Pass") }}</th></tr></thead>
+          <tbody>
+          {% for chave, item, criterio, _rejeitado in dados.ITENS_IMERSAO %}
+            <tr title="{{ criterio }}"><td>{{ item }}</td><td class="centro">{{ sim_nao(d.im_itens.get(chave)) }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</details>
+
+<details class="cartao" {{ 'open' if d.estado_eficiencia != 'empty' }}>
+  <summary>Optical efficiency {{ estado(d.estado_eficiencia) }}
+    <span class="direita suave pequeno">{{ quem_quando(te.data_teste, te.operador) or _('pass: x ≥ {x}', x=dados.LIMITE_EFICIENCIA) }}</span></summary>
+  <div class="dentro">
+    <dl class="chaves" style="margin-bottom: 14px">
+      <dt>{{ _("Test date") }}</dt><dd>{{ te.data_teste|ou_traco }}</dd>
+      <dt>{{ _("Performed by") }}</dt><dd>{{ te.operador|ou_traco }}</dd>
+      <dt>{{ _("Reference substrate") }}</dt><dd>{{ te.ref_id|ou_traco }}{% if te.ref_data %} · {{ _("installed") }} {{ te.ref_data }}{% endif %}</dd>
+      <dt>{{ _("Room") }}</dt><dd>{% if te.temperatura_c or te.umidade_pct %}{{ te.temperatura_c|num }} °C · {{ te.umidade_pct|num }} % RH{% else %}–{% endif %}</dd>
+      <dt>{{ _("Supervisor review") }}</dt><dd class="largo">{{ te.supervisor|ou_traco }}{% if te.data_revisao %} · {{ te.data_revisao }}{% endif %}</dd>
+      {% if te.observacoes %}<dt>{{ _("Observations") }}</dt><dd class="largo texto">{{ te.observacoes }}</dd>{% endif %}
+    </dl>
+    <table>
+      <thead><tr><th>Sample</th><th class="centro">{{ _("Tested") }}</th><th class="num">Mass before <span class="unid">(g)</span></th><th class="num">Mass after <span class="unid">(g)</span></th>
+        <th class="num">{{ _("Area") }} <span class="unid">(cm²)</span></th><th class="num">{{ _("Density") }} <span class="unid">(µg/cm²)</span></th><th class="num">Relative eff. x</th><th class="centro">{{ _("Pass") }}</th></tr></thead>
+      <tbody>
+      {% for a in dados.AMOSTRAS %}{% set r = d.ef_amostras.get(a, {}) %}
+        {% set area = dados.area_amostra_ef(r) %}
+        {% set x = dados.numero(r.eficiencia) %}
+        <tr><td class="mono">{{ a }}</td><td class="centro">{{ sim_nao(r.testada) }}</td>
+          <td class="num mono">{{ r.massa_antes|num }}</td><td class="num mono">{{ r.massa_depois|num }}</td>
+          <td class="num mono">{{ area|num }}</td>
+          <td class="num mono">{{ (r.densidade_ug_cm2 or dados.densidade(r.massa_antes, r.massa_depois, area))|num(2) }}</td>
+          <td class="num mono">{{ r.eficiencia|num }}</td>
+          <td class="centro">{% if r.testada == 'Yes' and x is not none %}{{ sim_nao('Yes' if x >= dados.LIMITE_EFICIENCIA else 'No') }}{% else %}<span class="suave">–</span>{% endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</details>
+
+{# janela: retirar um filtro (classe A ou B) – descarte ou limpeza #}
+<dialog id="dlg-retirar" class="dialogo pequeno">
+  <form method="post" id="form-retirar">
+    <div class="dialogo-topo"><h2 id="rt-titulo"></h2><button type="button" class="x" data-fechar>✕</button></div>
+    <div class="dialogo-corpo">
+      <p class="nota">{{ _("The filter leaves this sample: its slot stays empty, and its inspection stays recorded. The Final QA sign-off is not changed; the removal goes to the audit log.") }}</p>
+      <div class="opcoes-retirar">
+        <label class="marcar"><input type="radio" name="destino" value="Cleaning" checked>
+          <span><b>{{ _("Send to cleaning") }}</b><br><small class="suave">{{ _("Goes to the waiting list of the Cleaning lots tab; after cleaning it can be used in a new sample.") }}</small></span></label>
+        <label class="marcar"><input type="radio" name="destino" value="Discarded">
+          <span><b>{{ _("Discard") }}</b><br><small class="suave">{{ _("The filter is thrown away.") }}</small></span></label>
+      </div>
+      <label class="bloco-texto">{{ _("Note (optional)") }}<input name="obs" maxlength="300"></label>
+    </div>
+    <div class="dialogo-rodape">
+      <button type="button" class="botao" data-fechar>{{ _("Cancel") }}</button>
+      <button class="botao primario">{{ _("Remove filter") }}</button>
+    </div>
+  </form>
+</dialog>
+<script>
+  (function () {
+    const dlg = document.getElementById("dlg-retirar"), form = document.getElementById("form-retirar");
+    document.querySelectorAll("[data-retirar]").forEach((b) => b.addEventListener("click", () => {
+      form.action = b.dataset.retirar;
+      form.reset();
+      document.getElementById("rt-titulo").textContent = T("Remove filter {n} (class {c})", { n: b.dataset.filtro, c: b.dataset.classe });
+      dlg.showModal();
+    }));
+    dlg.querySelectorAll("[data-fechar]").forEach((b) => b.addEventListener("click", () => dlg.close()));
+  })();
+</script>
+
+<details class="cartao" open>
+  <summary>Final QA sign-off <span class="pill grande st-{{ d.status|lower|replace(' ', '-') }}">{{ d.status }}</span></summary>
+  <div class="dentro">
+    <dl class="chaves">
+      <dt>{{ _("Signed off by") }}</dt><dd>{{ t.qa_signoff_por|ou_traco }}</dd>
+      <dt>{{ _("Date") }}</dt><dd>{{ t.qa_signoff_data|ou_traco }}</dd>
+    </dl>
+    {% if (t.qa_signoff_por or '').strip() %}<p class="nota">🔒 {{ _("Completed: only an Admin can change this sample, and any change removes this sign-off – the sample goes back to “To be reviewed” and needs a new Final QA sign-off.") }}</p>{% endif %}
+  </div>
+</details>
+{% endblock %}

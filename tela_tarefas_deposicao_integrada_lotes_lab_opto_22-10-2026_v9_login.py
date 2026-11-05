@@ -268,6 +268,14 @@ def inicializar_banco():
         )
     """)
 
+    # de onde veio cada filtro, quando a deposição usou mais de uma caixa / lote (preenchida no aplicativo do navegador)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS filtro_origem (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, id_tarefa INTEGER, filtro INTEGER, tipo_lote TEXT, lote_id INTEGER,
+            codigo_lote TEXT, lote_interno_id INTEGER, codigo_lote_interno TEXT
+        )
+    """)
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS eficiencia_teste (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -472,7 +480,27 @@ def codigos_atuais_lotes_internos():
     return internos, limpezas
 
 
-_linhas_tarefas = []      # cache da tabela: (valores, status, texto de busca)
+_linhas_tarefas = []      # cache da tabela: (id no banco, valores, status, texto de busca)
+
+
+def numero_run(run):
+    """Número da evaporação (DUNE_EVAP_#0032# -> "32"): é o ID da tarefa mostrado no programa.
+    O id do banco continua existindo por baixo (links dos QR codes, tabelas ligadas à tarefa)."""
+    numeros = re.findall(r"\d+", str(run or ""))
+    return str(int(numeros[-1])) if numeros else ""
+
+
+def _runs_tarefas():
+    conn = conectar()
+    try:
+        return dict(conn.execute("SELECT id_tarefa, run_evaporation FROM inspecao_visual_cab").fetchall())
+    finally:
+        conn.close()
+
+
+def id_tarefa(tarefa_id):
+    """ID mostrado ao usuário (número da run) de uma tarefa gravada; '-' se ela ainda não tem run."""
+    return numero_run(_runs_tarefas().get(int(tarefa_id))) or "-"
 
 
 def carregar_tarefas():
@@ -514,6 +542,7 @@ def carregar_tarefas():
     _linhas_tarefas.clear()
     for row in linhas:
         valores = list(row)
+        valores[0] = numero_run(runs.get(row[0])) or "-"        # ID = número da run
         if row[0] in codigos_por_tarefa:
             valores[2] = "; ".join(codigos_por_tarefa[row[0]])       # Internal Batch (ex.: DUNE-CX-0001)
         valores[5] = f"{row[5]}/{N_FILTROS}"
@@ -521,8 +550,10 @@ def carregar_tarefas():
         valores.insert(2, status or "-")
         valores.insert(2, runs.get(row[0]) or "-")
         texto = " ".join(str(v) for v in valores if v is not None) + " " + str(row[2] or "") + " " + extras_busca.get(row[0], "")
-        _linhas_tarefas.append((valores, status, texto.upper().replace("_", "-")))   # _ e - valem igual (planilha mistura)
+        _linhas_tarefas.append((row[0], valores, status, texto.upper().replace("_", "-")))   # _ e - valem igual (planilha mistura)
 
+    # maior run primeiro; tarefas ainda sem run (sem ID) ficam no topo
+    _linhas_tarefas.sort(key=lambda l: (l[1][0] == "-", int(l[1][0]) if l[1][0] != "-" else 0, l[0]), reverse=True)
     filtrar_tarefas()
 
 
@@ -534,12 +565,12 @@ def filtrar_tarefas(*_):
     termos = busca_tarefa_var.get().upper().replace("_", "-").split()
     status_sel = filtro_status_var.get()
     n = 0
-    for valores, status, texto in _linhas_tarefas:
+    for tid, valores, status, texto in _linhas_tarefas:
         if status_sel != "All" and status != status_sel:
             continue
         if any(t not in texto for t in termos):
             continue
-        tabela.insert("", "end", values=valores, tags=(status,))
+        tabela.insert("", "end", iid=str(tid), image=badge_status(status), values=valores[:3] + valores[4:])
         n += 1
 
     total = len(_linhas_tarefas)
@@ -889,11 +920,11 @@ def selecionar_lote_em_janela():
         return
 
     fundo = "#f4f6f8"
-    win = tk.Toplevel(janela)
+    win = tk.Toplevel(janela_tarefa)
     win.title("Select batch and internal lot")
     win.geometry("1100x700")
     win.configure(bg=fundo)
-    win.transient(janela)
+    win.transient(janela_tarefa)
     win.grab_set()
 
     nb = ttk.Notebook(win)
@@ -1248,31 +1279,154 @@ def salvar_tarefa():
 
     status, pend = atualizar_status_tarefa(tarefa_id)
     leptons_auth.registrar("TASK_CREATE", f"id={tarefa_id} PID={dados['serial']} status={status}")
-    messagebox.showinfo("Saved", "Task saved.\n\n" + texto_status_salvo(status, pend))
-    limpar_campos()
-    carregar_tarefas()
+    messagebox.showinfo("Saved", "Task saved.\n\n" + texto_status_salvo(status, pend), parent=janela_tarefa)
+    _depois_de_gravar(tarefa_id)
+    return True
 
 
 def carregar_para_edicao():
-    global tarefa_em_edicao_id
-
+    """Abre a tarefa selecionada na lista na janela da tarefa."""
     item = tabela.selection()
     if not item:
-        messagebox.showwarning("Warning", "Please select a task to edit")
+        messagebox.showwarning("Warning", "Please select a task to open")
         return
 
-    tarefa_id = tabela.item(item[0], "values")[0]
+    tarefa_id = item[0]
+    if not _pode_trocar_tarefa():
+        return
+    if not _carregar_tarefa_no_formulario(tarefa_id):
+        messagebox.showerror("Erro", "Registro não encontrado.")
+        return
+    abrir_janela_tarefa()
 
+
+def _carregar_tarefa_no_formulario(tarefa_id):
+    global tarefa_em_edicao_id
     conn = conectar()
     try:
         achou = preencher_formulario(conn.cursor(), tarefa_id)
     finally:
         conn.close()
-    if not achou:
-        messagebox.showerror("Erro", "Registro não encontrado.")
+    if achou:
+        tarefa_em_edicao_id = tarefa_id
+        lbl_modo["text"] = f"Mode: editing ID {id_tarefa(tarefa_id)}"
+    return achou
+
+
+# ---------- janela da tarefa: abrir / fechar, alterações não gravadas ----------
+_estado_gravado = None        # retrato do formulário quando foi aberto ou gravado
+
+
+def _valores_vars(obj):
+    if isinstance(obj, dict):       # dif / dens / cond são recalculados: não contam como alteração
+        return [(str(k), _valores_vars(v)) for k, v in sorted(obj.items(), key=lambda kv: str(kv[0]))
+                if k not in ("dif", "dens", "cond")]
+    if isinstance(obj, tk.Variable):
+        return obj.get()
+    return None
+
+
+def _estado_formulario():
+    entradas = (entry_data, entry_posicao, entry_resp, entry_a2, entry_d2, entry_a3, entry_d3,
+                entry_a14, entry_d14, entry_ptp_mass, entry_ptp_lote)
+    return repr(([e.get().strip() for e in entradas], entry_obs.get("1.0", tk.END).strip(), tipo_var.get(),
+                 obter_lotes_selecionados(), list(anexos_lista), _valores_vars(inspecao_vars),
+                 _valores_vars(imersao_vars), _valores_vars(ef_vars), _valores_vars(signoff_vars)))
+
+
+def _marcar_gravado():
+    global _estado_gravado
+    _estado_gravado = _estado_formulario()
+
+
+def _formulario_alterado():
+    if not janela_tarefa.winfo_viewable():
+        return False
+    # observações digitadas nas janelas de teste abertas (só vão para as variáveis quando a janela fecha)
+    for txt, var in ((txt_notas_inspecao, inspecao_vars["cab"]["notes"]), (txt_obs_imersao, imersao_vars["obs"]),
+                     (txt_obs_eficiencia, ef_vars["teste"]["obs"])):
+        try:
+            if txt is not None and txt.winfo_exists():
+                var.set(txt.get("1.0", "end").strip())
+        except tk.TclError:
+            pass
+    return _estado_formulario() != _estado_gravado
+
+
+def _pode_trocar_tarefa():
+    """Antes de fechar a janela da tarefa ou abrir outra: oferece gravar o que mudou. False = cancelado."""
+    if not _formulario_alterado():
+        return True
+    nome = "the new task" if tarefa_em_edicao_id is None else f"task ID {id_tarefa(tarefa_em_edicao_id)}"
+    resposta = messagebox.askyesnocancel("Unsaved changes", f"Save the changes to {nome}?", parent=janela_tarefa)
+    if resposta is None:
+        return False
+    return salvar_ou_atualizar() if resposta else True
+
+
+def abrir_janela_tarefa(gravado=True):
+    """Mostra o formulário (gravado=False: dados ainda não gravados, ex.: importados de um .json)."""
+    if tarefa_em_edicao_id is None:
+        janela_tarefa.title("New task – Deposition Control System for DUNE")
+    else:
+        janela_tarefa.title(f"Task ID {id_tarefa(tarefa_em_edicao_id)} – {entry_pid.get().strip() or '-'}")
+    if gravado:
+        _marcar_gravado()
+    canvas_conteudo.yview_moveto(0)
+    janela_tarefa.deiconify()
+    janela_tarefa.lift()
+    janela_tarefa.focus_force()
+
+
+def fechar_janela_tarefa():
+    if not _pode_trocar_tarefa():
         return
-    tarefa_em_edicao_id = tarefa_id
-    lbl_modo["text"] = f"Mode: editing ID {tarefa_id}"
+    limpar_campos()
+    janela_tarefa.withdraw()
+
+
+def nova_tarefa():
+    if not _pode_trocar_tarefa():
+        return
+    limpar_campos()
+    abrir_janela_tarefa()
+
+
+def salvar_ou_atualizar():
+    """Botão Save: grava uma tarefa nova ou atualiza a tarefa aberta. True se gravou."""
+    numero = numero_run(cab_vars["run_evaporation"].get())
+    outras = [t for t, run in _runs_tarefas().items()
+              if numero and numero_run(run) == numero and str(t) != str(tarefa_em_edicao_id)]
+    if outras and not messagebox.askyesno(
+            "Save", f"ID {numero} (run {cab_vars['run_evaporation'].get().strip()}) is already used by another "
+            f"task ({len(outras)}). The ID comes from the run number, so two tasks would show the same ID.\n\n"
+            "Save anyway?", parent=janela_tarefa):
+        return False
+    return bool(editar_tarefa() if tarefa_em_edicao_id is not None else salvar_tarefa())
+
+
+def _depois_de_gravar(tarefa_id):
+    """Recarrega a tarefa gravada na janela (continua aberta) e a seleciona na lista."""
+    carregar_tarefas()
+    _carregar_tarefa_no_formulario(tarefa_id)
+    abrir_janela_tarefa()
+    if tabela.exists(str(tarefa_id)):
+        tabela.selection_set(str(tarefa_id))
+        tabela.see(str(tarefa_id))
+
+
+def _tarefa_aberta():
+    """Id da tarefa aberta na janela da tarefa (precisa estar gravada)."""
+    if tarefa_em_edicao_id is None:
+        messagebox.showwarning("Warning", "Save the task first.", parent=janela_tarefa)
+        return None
+    return int(tarefa_em_edicao_id)
+
+
+def _na_tarefa_aberta(funcao, *args):
+    tarefa_id = _tarefa_aberta()
+    if tarefa_id is not None:
+        funcao(tarefa_id, *args)
 
 
 def preencher_formulario(cur, tarefa_id):
@@ -1352,16 +1506,24 @@ def editar_tarefa():
     if dados is None:
         return
 
-    # tarefa já revisada: qualquer alteração exige uma nova revisão
+    # tarefa já revisada (Completed): só um Admin altera, e qualquer alteração exige um novo Final QA sign-off
     conn = conectar()
     revisada = conn.execute("SELECT qa_signoff_por, qa_signoff_data FROM tarefas WHERE id = ?",
                             (tarefa_em_edicao_id,)).fetchone()
     conn.close()
     if revisada and (revisada[0] or "").strip():
+        if not leptons_auth.eh_admin():
+            leptons_auth.registrar("EDIT_DENIED", f"id={tarefa_em_edicao_id} save: signed off, not an Admin")
+            messagebox.showerror(
+                "Save",
+                f"This task was signed off (Final QA) by {revisada[0]} on {revisada[1] or '-'}.\n\n"
+                "Only an Admin can change a completed task. Nothing was saved.")
+            return
         if not messagebox.askyesno(
-                "Edit / Update",
-                f"This task was reviewed by {revisada[0]} on {revisada[1] or '-'}.\n\n"
-                "Saving changes removes the review and sends the task back to 'To be reviewed'. Continue?"):
+                "Save",
+                f"This task was signed off (Final QA) by {revisada[0]} on {revisada[1] or '-'}.\n\n"
+                "Saving changes removes the sign-off: the task goes back to 'To be reviewed' and needs a new "
+                "Final QA sign-off. Continue?"):
             return
         limpar_signoff()
         leptons_auth.registrar("TASK_REVIEW_CLEARED", f"id={tarefa_em_edicao_id} PID={dados['serial']} "
@@ -1403,9 +1565,9 @@ def editar_tarefa():
 
     status, pend = atualizar_status_tarefa(tarefa_em_edicao_id)
     leptons_auth.registrar("TASK_UPDATE", f"id={tarefa_em_edicao_id} PID={dados['serial']} status={status}")
-    messagebox.showinfo("Saved", "Task updated.\n\n" + texto_status_salvo(status, pend))
-    limpar_campos()
-    carregar_tarefas()
+    messagebox.showinfo("Saved", "Task updated.\n\n" + texto_status_salvo(status, pend), parent=janela_tarefa)
+    _depois_de_gravar(tarefa_em_edicao_id)
+    return True
 
 
 # =====================================================
@@ -1483,9 +1645,11 @@ def _lotes_ausentes(linhas_lotes):
 
 
 def importar_tarefa_json():
-    """Carrega uma tarefa exportada (.json) na tela para revisão; o usuário grava com Save ou Edit / Update."""
+    """Carrega uma tarefa exportada (.json) na janela da tarefa para revisão; o usuário grava com Save."""
     global tarefa_em_edicao_id
 
+    if not _pode_trocar_tarefa():
+        return
     caminho = filedialog.askopenfilename(
         title="Import task from JSON",
         initialdir=os.path.abspath(PASTA_JSON) if os.path.isdir(PASTA_JSON) else os.getcwd(),
@@ -1516,15 +1680,15 @@ def importar_tarefa_json():
         alvo = dados.get("source_task_id") if dados.get("source_task_id") in existentes else existentes[-1]
         resposta = messagebox.askyesnocancel(
             "Import task",
-            f"A task with PID {pid} already exists (ID {', '.join(map(str, existentes))}).\n\n"
-            f"Yes = load the file over task ID {alvo} (review, then Edit / Update)\n"
+            f"A task with PID {pid} already exists (ID {', '.join(id_tarefa(t) for t in existentes)}).\n\n"
+            f"Yes = load the file over task ID {id_tarefa(alvo)} (review, then Save)\n"
             "No = load it as a new task (review, then Save)\n"
             "Cancel = do nothing")
         if resposta is None:
             return
         destino = alvo if resposta else None
 
-    # cópia em memória com o mesmo formato do banco: a tela é preenchida pelo mesmo código do "Load for edit"
+    # cópia em memória com o mesmo formato do banco: a tela é preenchida pelo mesmo código do "Open task"
     mem = sqlite3.connect(":memory:")
     try:
         def inserir(tab, linha):
@@ -1560,17 +1724,18 @@ def importar_tarefa_json():
     if destino is None:
         lbl_modo["text"] = f"Mode: new record (imported from {nome}) – click Save"
     else:
-        lbl_modo["text"] = f"Mode: editing ID {destino} (imported from {nome}) – click Edit / Update"
+        lbl_modo["text"] = f"Mode: editing ID {id_tarefa(destino)} (imported from {nome}) – click Save"
     leptons_auth.registrar("TASK_IMPORT_JSON", f"PID={pid} file={nome} into={'new' if destino is None else 'id=' + str(destino)}")
 
+    abrir_janela_tarefa(gravado=False)
     aviso = ""
     ausentes = _lotes_ausentes(tabelas.get("tarefa_lotes") or [])
     if ausentes:
         aviso = ("\n\nThese batches are not registered on this computer (they are kept with their codes):\n"
                  + ", ".join(dict.fromkeys(ausentes)))
     messagebox.showinfo("Import", f"Task {pid or '-'} loaded from {nome}.\n\nReview the data, then click "
-                        + ("Save to create it." if destino is None else f"Edit / Update to overwrite task ID {destino}.")
-                        + aviso)
+                        + ("Save to create it." if destino is None else f"Save to overwrite task ID {id_tarefa(destino)}.")
+                        + aviso, parent=janela_tarefa)
 
 
 def excluir_tarefa():
@@ -1579,8 +1744,9 @@ def excluir_tarefa():
         messagebox.showwarning("Warning", "Please select a task to delete")
         return
 
-    tarefa_id = tabela.item(item[0], "values")[0]
-    ok = messagebox.askyesno("Confirmar exclusão", f"Excluir a tarefa ID {tarefa_id}?")
+    tarefa_id = item[0]
+    ok = messagebox.askyesno("Confirmar exclusão", f"Excluir a tarefa ID {id_tarefa(tarefa_id)} "
+                             f"({tabela.item(item[0], 'values')[1]})?")
     if not ok:
         return
 
@@ -1593,6 +1759,7 @@ def excluir_tarefa():
     cur.execute("DELETE FROM imersao_massas WHERE id_tarefa = ?", (tarefa_id,))
     cur.execute("DELETE FROM imersao_itens WHERE id_tarefa = ?", (tarefa_id,))
     cur.execute("DELETE FROM tarefa_lotes WHERE id_tarefa = ?", (tarefa_id,))
+    cur.execute("DELETE FROM filtro_origem WHERE id_tarefa = ?", (tarefa_id,))
     cur.execute("DELETE FROM eficiencia_teste WHERE id_tarefa = ?", (tarefa_id,))
     cur.execute("DELETE FROM eficiencia_amostras WHERE id_tarefa = ?", (tarefa_id,))
     cur.execute("DELETE FROM tarefas WHERE id = ?", (tarefa_id,))
@@ -1601,7 +1768,9 @@ def excluir_tarefa():
     leptons_auth.registrar("TASK_DELETE", f"id={tarefa_id} PID={_pid_excluido}")
 
     messagebox.showinfo("Sucesso", "Registro excluído.")
-    limpar_campos()
+    if str(tarefa_em_edicao_id) == str(tarefa_id):
+        limpar_campos()
+        janela_tarefa.withdraw()
     carregar_tarefas()
 
 # =====================================================
@@ -1612,7 +1781,7 @@ def _tarefa_selecionada():
     if not item:
         messagebox.showwarning("Warning", "Please select a task")
         return None
-    return int(tabela.item(item[0], "values")[0])
+    return int(item[0])
 
 
 def _fonte_qr(tamanho, negrito=True):
@@ -1667,9 +1836,9 @@ def gerar_imagem_qr(url, pid, caminho):
     return caminho
 
 
-def gerar_qr():
-    """Gera o QR code que abre a página de opções do relatório da tarefa selecionada."""
-    tarefa_id = _tarefa_selecionada()
+def gerar_qr(tarefa_id=None):
+    """Gera o QR code que abre a página de opções do relatório da tarefa (ou da selecionada na lista)."""
+    tarefa_id = tarefa_id or _tarefa_selecionada()
     if tarefa_id is None:
         return
 
@@ -1736,7 +1905,7 @@ def abrir_detalhes_tarefa():
         messagebox.showwarning("Warning", "Please select a task")
         return
 
-    tarefa_id = tabela.item(item[0], "values")[0]
+    tarefa_id = item[0]
     dados = buscar_dados_qr(tarefa_id)
 
     if not dados:
@@ -1950,12 +2119,12 @@ def abrir_inspecao_visual():
         return
 
     BG = "#f4f6f8"
-    win = tk.Toplevel(janela)
+    win = tk.Toplevel(janela_tarefa)
     janela_inspecao = win
     win.title("Visual Inspection - Deposition Inspection Record")
     win.geometry("1200x860")
     win.configure(bg=BG)
-    win.transient(janela)
+    win.transient(janela_tarefa)
     win.protocol("WM_DELETE_WINDOW", fechar_janela_inspecao)
 
     # ---------- título ----------
@@ -2314,12 +2483,12 @@ def abrir_imersao_criogenica():
     AZUL = "#1f3a5f"
     LINHA_ALT = "#dce6f2"
 
-    win = tk.Toplevel(janela)
+    win = tk.Toplevel(janela_tarefa)
     janela_imersao = win
     win.title("Cryogenic Immersion")
     win.geometry("1040x860")
     win.configure(bg=BG)
-    win.transient(janela)
+    win.transient(janela_tarefa)
     win.protocol("WM_DELETE_WINDOW", fechar_janela_imersao)
 
     # ---------- título ----------
@@ -3214,6 +3383,11 @@ def _aplicar_no_formulario(lista):
 def aplicar_mudancas_planilha(mudancas, arquivo, criar_novas=True):
     """Grava as mudanças nas tarefas (criando as novas, se pedido) e no formulário aberto.
     Retorna (nº de mudanças gravadas, nº de tarefas criadas)."""
+    if not leptons_auth.eh_admin():       # tarefas revisadas (Completed): só um Admin altera
+        puladas = sorted({m["pid"] for m in mudancas if m["revisada"]})
+        if puladas:
+            leptons_auth.registrar("EDIT_DENIED", f"sheet sync: {', '.join(puladas)} signed off, not an Admin")
+        mudancas = [m for m in mudancas if not m["revisada"]]
     por_alvo = {}
     for m in mudancas:
         por_alvo.setdefault(m["alvo"], []).append(m)
@@ -3255,10 +3429,13 @@ def aplicar_mudancas_planilha(mudancas, arquivo, criar_novas=True):
 
     # formulário: tarefa nova, ou a tarefa gravada que está aberta para edição (o id vem da tabela como texto)
     editada = next((a for a in por_alvo if isinstance(a, int) and str(a) == str(tarefa_em_edicao_id)), None)
+    limpo = not _formulario_alterado()
     _aplicar_no_formulario(por_alvo.get(None, []) + por_alvo.get(editada, []))
     if editada is not None and por_alvo[editada][0]["revisada"]:
         limpar_signoff()
     atualizar_resumos()
+    if limpo and editada is not None:
+        _marcar_gravado()
 
     novas = sum(1 for a in ids if isinstance(a, tuple))
     for alvo, tid in ids.items():
@@ -3304,7 +3481,9 @@ def janela_mudancas_planilha(parent, mudancas, n_tarefas, arquivo, abas):
     if revisadas:
         tk.Label(win, bg=BG, fg=CORES_STATUS[STATUS_INCOMPLETO][0], font=("Segoe UI", 9, "bold"), anchor="w",
                  justify="left", wraplength=1000,
-                 text="⚠ Already reviewed – applying clears the review, so they must be reviewed again: "
+                 text=("⚠ Already signed off – applying removes the Final QA sign-off, so they need a new sign-off: "
+                       if leptons_auth.eh_admin() else
+                       "🔒 Signed off (Completed) – only an Admin can change them, so these are skipped: ")
                       + ", ".join(revisadas)).pack(fill="x", padx=12, pady=(4, 0))
 
     criar_var = tk.BooleanVar(value=True)
@@ -3429,12 +3608,12 @@ def abrir_eficiencia_optica():
     LINHA_ALT = "#dce6f2"
     hoje = lambda: datetime.today().strftime("%Y-%m-%d")
 
-    win = tk.Toplevel(janela)
+    win = tk.Toplevel(janela_tarefa)
     janela_eficiencia = win
     win.title("Optical Efficiency")
     win.geometry("1100x840")
     win.configure(bg=BG)
-    win.transient(janela)
+    win.transient(janela_tarefa)
     win.protocol("WM_DELETE_WINDOW", fechar_janela_eficiencia)
 
     tv = ef_vars["teste"]
@@ -3842,7 +4021,25 @@ STATUS_COMPLETO = "Completed"
 # status: (cor do texto, cor de fundo) na tabela
 CORES_STATUS = {STATUS_INCOMPLETO: ("#c62828", "#fdecea"), STATUS_REVISAR: ("#1565c0", "#e3eefc"),
                 STATUS_COMPLETO: ("#2e7d32", "#e6f4ea")}
-PERFIS_REVISORES = ("Admin", "Supervisor/QA")      # quem pode marcar uma tarefa como revisada
+LARGURA_BADGE = 118
+_badges_status = {}
+
+
+def badge_status(status):
+    """Etiqueta colorida da coluna Status da lista (o Treeview só pinta linhas inteiras; a imagem pinta só a célula)."""
+    if status not in _badges_status:
+        cor = CORES_STATUS.get(status, ("#9e9e9e", ""))[0]
+        img = Image.new("RGBA", (LARGURA_BADGE, 20), (0, 0, 0, 0))
+        desenho = ImageDraw.Draw(img)
+        desenho.rounded_rectangle((0, 0, LARGURA_BADGE - 1, 19), radius=9, fill=cor)
+        fonte = _fonte_qr(12)
+        try:
+            desenho.text((LARGURA_BADGE / 2, 10), status or "-", fill="white", font=fonte, anchor="mm")
+        except (ValueError, TypeError):          # fonte bitmap (sem TrueType no sistema) não aceita anchor
+            desenho.text((8, 4), status or "-", fill="white", font=fonte)
+        _badges_status[status] = ImageTk.PhotoImage(img, master=janela)
+    return _badges_status[status]
+PERFIS_REVISORES = ("Admin",)                       # quem pode marcar uma tarefa como revisada
 
 
 def pendencias_dados(d):
@@ -3945,7 +4142,7 @@ def texto_status_salvo(status, pend):
         lista = "\n".join("•  " + p for p in pend[:12]) + (f"\n•  ... and {len(pend) - 12} more" if len(pend) > 12 else "")
         return f"Status: {status} – missing information:\n\n" + lista
     if status == STATUS_REVISAR:
-        return f"Status: {status} – all the information is filled. A Supervisor/QA can now review it (Review task)."
+        return f"Status: {status} – all the information is filled. An Admin can now review it (Review task)."
     return f"Status: {status}"
 
 
@@ -4741,9 +4938,9 @@ def gerar_pdf_relatorio(tarefa_id, caminho):
     return caminho
 
 
-def imprimir_relatorio_pdf():
-    """Gera o PDF do cadastro selecionado e abre no visualizador."""
-    tarefa_id = _tarefa_selecionada()
+def imprimir_relatorio_pdf(tarefa_id=None):
+    """Gera o PDF da tarefa (ou da selecionada na lista) e abre no visualizador."""
+    tarefa_id = tarefa_id or _tarefa_selecionada()
     if tarefa_id is None:
         return
 
@@ -4845,9 +5042,9 @@ def gerar_todos_pdfs():
 signoff_vars = {}
 
 
-def abrir_revisao_tarefa():
-    """Resumo da tarefa selecionada para revisão; o botão "Reviewed" faz o QA sign-off (tarefa -> Completed)."""
-    tarefa_id = _tarefa_selecionada()
+def abrir_revisao_tarefa(tarefa_id=None, pai=None):
+    """Resumo da tarefa (ou da selecionada na lista) para revisão; o botão "Reviewed" faz o QA sign-off (-> Completed)."""
+    tarefa_id = tarefa_id or _tarefa_selecionada()
     if tarefa_id is None:
         return
     d = coletar_dados_relatorio(tarefa_id)
@@ -4860,10 +5057,10 @@ def abrir_revisao_tarefa():
     cor, fundo = CORES_STATUS[status]
     BG = "#f4f6f8"
 
-    win = tk.Toplevel(janela)
+    win = tk.Toplevel(pai or janela)
     win.title(f"Review – {t.get('codigo_tarefa') or tarefa_id}")
     win.configure(bg=BG)
-    win.transient(janela)
+    win.transient(pai or janela)
 
     topo = tk.Frame(win, bg=fundo, highlightbackground=cor, highlightthickness=2)
     topo.pack(fill="x", padx=12, pady=(12, 6))
@@ -4909,7 +5106,7 @@ def abrir_revisao_tarefa():
             webbrowser.open(preparado[1])
 
     ttk.Button(barra, text="Open report", command=abrir_no_navegador).pack(side="left", padx=(0, 6))
-    ttk.Button(barra, text="Print report (PDF)", command=imprimir_relatorio_pdf).pack(side="left", padx=6)
+    ttk.Button(barra, text="Print report (PDF)", command=lambda: imprimir_relatorio_pdf(tarefa_id)).pack(side="left", padx=6)
     ttk.Button(barra, text="Close", command=win.destroy).pack(side="right")
 
     pode_revisar = leptons_auth.usuario_atual.get("perfil") in PERFIS_REVISORES
@@ -4946,8 +5143,11 @@ def marcar_tarefa_revisada(tarefa_id, win=None):
     conn.close()
     leptons_auth.registrar("TASK_REVIEWED", f"id={tarefa_id} PID={pid}")
     if tarefa_em_edicao_id is not None and str(tarefa_em_edicao_id) == str(tarefa_id):
+        limpo = not _formulario_alterado()
         signoff_vars["por"].set(nome)          # a tarefa está aberta na tela: mostra o sign-off
         signoff_vars["data"].set(hoje)
+        if limpo:
+            _marcar_gravado()
     carregar_tarefas()
     if win is not None:
         win.destroy()
@@ -5252,8 +5452,16 @@ lbl_relogio = tk.Label(frame_relogio, text="", fg="white", bg="#1f3a5f", font=("
 lbl_relogio.pack(anchor="e")
 inserir_logo("direita.png", 3, "e")   # logo na coluna própria; o relógio fica à esquerda dela
 
-# ---------- CONTEÚDO (rolável: em telas baixas a tabela de tarefas fica abaixo da borda) ----------
-area_conteudo = tk.Frame(janela, bg="#f4f6f8")
+# ---------- JANELA DA TAREFA (abre ao clicar duas vezes numa tarefa da lista ou em "New task") ----------
+janela_tarefa = tk.Toplevel(janela)
+janela_tarefa.withdraw()
+janela_tarefa.title("Task")
+janela_tarefa.geometry("1350x860")
+janela_tarefa.configure(bg="#f4f6f8")
+janela_tarefa.protocol("WM_DELETE_WINDOW", lambda: fechar_janela_tarefa())
+
+# conteúdo rolável: em telas baixas a parte de baixo do formulário fica abaixo da borda
+area_conteudo = tk.Frame(janela_tarefa, bg="#f4f6f8")
 area_conteudo.pack(fill="both", expand=True)
 canvas_conteudo = tk.Canvas(area_conteudo, bg="#f4f6f8", highlightthickness=0, yscrollincrement=20)
 barra_rolagem = ttk.Scrollbar(area_conteudo, orient="vertical", command=canvas_conteudo.yview)
@@ -5268,7 +5476,7 @@ frame.bind("<Configure>", lambda e: canvas_conteudo.configure(scrollregion=canva
 
 
 def rolar_conteudo(event):
-    """Roda do mouse na tela principal (tabelas e textos continuam rolando sozinhos)."""
+    """Roda do mouse na janela da tarefa (tabelas e textos continuam rolando sozinhos)."""
     w = event.widget
     if not hasattr(w, "winfo_class") or w.winfo_class() in ("Treeview", "Text", "TCombobox", "Listbox"):
         return
@@ -5278,14 +5486,8 @@ def rolar_conteudo(event):
 
 
 for _evento in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
-    janela.bind(_evento, rolar_conteudo)      # só a janela principal; as outras janelas têm a sua rolagem
+    janela_tarefa.bind(_evento, rolar_conteudo)      # só a janela da tarefa; as outras janelas têm a sua rolagem
 
-
-def ir_para_tarefas():
-    """Rola até a lista de tarefas gravadas e põe o cursor na busca."""
-    canvas_conteudo.update_idletasks()
-    canvas_conteudo.yview_moveto(1.0)
-    entry_busca_tarefa.focus_set()
 frame.grid_columnconfigure(1, weight=1)
 frame.grid_columnconfigure(2, weight=1)
 
@@ -5408,18 +5610,6 @@ imersao_var.trace_add("write", atualizar_resumos)
 valor_ef_var.trace_add("write", atualizar_resumos)
 atualizar_resumos()
 
-# ---------- Sincronização com a planilha DUNE_Control (Deposition Control + Efficiency Test) ----------
-tk.Button(quadro_qualidade, text="⟳  Sync Leptons Control Sheet", command=lambda: importar_eficiencia_planilha(janela),
-          bg="#5e35b1", fg="white", font=("Segoe UI", 11, "bold"), relief="flat", cursor="hand2", width=26, pady=9,
-          activebackground="#5e35b1", activeforeground="white").grid(row=6, column=0, sticky="w", pady=(10, 2))
-frame_sync = tk.Frame(quadro_qualidade, bg="#f4f6f8")
-frame_sync.grid(row=7, column=0, sticky="w", pady=(0, 6))
-lbl_sync_info = tk.Label(frame_sync, text="Updates every task from DUNE_Control.xlsx\n"
-                                          "(Deposition Control + Efficiency Test tabs)",
-                         bg="#f4f6f8", fg="#555555", font=("Segoe UI", 8), anchor="w", justify="left", wraplength=300)
-lbl_sync_info.pack(anchor="w")
-ttk.Button(frame_sync, text="☰  Browse saved tasks", command=ir_para_tarefas).pack(anchor="w", pady=(8, 0))
-
 # ---------- Final QA Sign-Off (aval final, depois de todos os testes) ----------
 quadro_signoff = tk.LabelFrame(quadro_qualidade, text="Final QA Sign-Off", bg="#f4f6f8",
                                font=("Segoe UI", 10, "bold"), padx=8, pady=6)
@@ -5497,34 +5687,52 @@ entry_ptp_lote.pack(side="left")
 tk.Label(frame_ptp_mass, text=f"Area: {AREA_FILTRO_MM2:.0f} mm² = {AREA_FILTRO_CM2:.1f} cm²", bg="#f4f6f8", fg="#555555", font=("Segoe UI", 9)).pack(anchor="w", pady=(10, 0))
 tk.Label(frame_ptp_mass, text="density = (after − before) / area", bg="#f4f6f8", fg="#555555", font=("Segoe UI", 9)).pack(anchor="w", pady=(2, 0))
 
-# ---------- BOTÕES ----------
+# ---------- BOTÕES DA JANELA DA TAREFA ----------
 btn = tk.Frame(frame, bg="#f4f6f8")
 btn.grid(row=2, column=0, columnspan=3, pady=12)
-btn1 = tk.Frame(btn, bg="#f4f6f8")
-btn1.pack(side="top")
-btn2 = tk.Frame(btn, bg="#f4f6f8")
-btn2.pack(side="top", pady=(8, 0))
 
-tk.Button(btn1, text="Save", command=salvar_tarefa, bg="#2e6f95", fg="white", font=("Segoe UI", 10, "bold"), padx=15, pady=6, relief="flat").pack(side="left", padx=8)
-tk.Button(btn1, text="Load for edit", command=carregar_para_edicao, bg="#1f77b4", fg="white", font=("Segoe UI", 10, "bold"), padx=15, pady=6, relief="flat").pack(side="left", padx=8)
-tk.Button(btn1, text="Edit / Update", command=editar_tarefa, bg="#ef6c00", fg="white", font=("Segoe UI", 10, "bold"), padx=15, pady=6, relief="flat").pack(side="left", padx=8)
-tk.Button(btn1, text="Clear", command=limpar_campos, bg="#607d8b", fg="white", font=("Segoe UI", 10, "bold"), padx=15, pady=6, relief="flat").pack(side="left", padx=8)
-tk.Button(btn1, text="Delete", command=excluir_tarefa, bg="#c62828", fg="white", font=("Segoe UI", 10, "bold"), padx=15, pady=6, relief="flat").pack(side="left", padx=8)
-ttk.Button(btn1, text="Generate QR Code", command=gerar_qr).pack(side="left", padx=8, ipadx=10)
-ttk.Button(btn1, text="Print report (PDF)", command=imprimir_relatorio_pdf).pack(side="left", padx=8, ipadx=10)
-ttk.Button(btn2, text="Export all PDFs", command=gerar_todos_pdfs).pack(side="left", padx=8, ipadx=10)
-ttk.Button(btn2, text="Export task (JSON)", command=exportar_tarefa_json).pack(side="left", padx=8, ipadx=10)
-ttk.Button(btn2, text="Import task (JSON)", command=importar_tarefa_json).pack(side="left", padx=8, ipadx=10)
-ttk.Button(btn2, text="Backup now", command=backup_agora).pack(side="left", padx=8, ipadx=10)
-ttk.Button(btn1, text="View details", command=abrir_detalhes_tarefa).pack(side="left", padx=8, ipadx=10)
-tk.Button(btn2, text="Review task", command=abrir_revisao_tarefa, bg=CORES_STATUS[STATUS_REVISAR][0], fg="white",
-          font=("Segoe UI", 10, "bold"), padx=15, pady=4, relief="flat").pack(side="left", padx=8)
+tk.Button(btn, text="Save", command=salvar_ou_atualizar, bg="#2e6f95", fg="white", font=("Segoe UI", 10, "bold"), padx=22, pady=6, relief="flat").pack(side="left", padx=8)
+tk.Button(btn, text="Review task", command=lambda: _na_tarefa_aberta(abrir_revisao_tarefa, janela_tarefa),
+          bg=CORES_STATUS[STATUS_REVISAR][0], fg="white", font=("Segoe UI", 10, "bold"), padx=15, pady=6, relief="flat").pack(side="left", padx=8)
+ttk.Button(btn, text="Print report (PDF)", command=lambda: _na_tarefa_aberta(imprimir_relatorio_pdf)).pack(side="left", padx=8, ipadx=10)
+ttk.Button(btn, text="Generate QR Code", command=lambda: _na_tarefa_aberta(gerar_qr)).pack(side="left", padx=8, ipadx=10)
+tk.Button(btn, text="Close", command=fechar_janela_tarefa, bg="#607d8b", fg="white", font=("Segoe UI", 10, "bold"), padx=15, pady=6, relief="flat").pack(side="left", padx=8)
+
+# ---------- TELA PRINCIPAL: LISTA DE TAREFAS ----------
+lista = tk.Frame(janela, bg="#f4f6f8", padx=20, pady=10)
+lista.pack(fill="both", expand=True)
+lista.columnconfigure(0, weight=1)
+
+acoes = tk.Frame(lista, bg="#f4f6f8")
+acoes.grid(row=0, column=0, sticky="w")
+tk.Button(acoes, text="＋  New task", command=nova_tarefa, bg="#2e6f95", fg="white", font=("Segoe UI", 10, "bold"), padx=15, pady=6, relief="flat").pack(side="left", padx=(0, 8))
+tk.Button(acoes, text="Open task", command=carregar_para_edicao, bg="#1f77b4", fg="white", font=("Segoe UI", 10, "bold"), padx=15, pady=6, relief="flat").pack(side="left", padx=8)
+tk.Button(acoes, text="Review task", command=abrir_revisao_tarefa, bg=CORES_STATUS[STATUS_REVISAR][0], fg="white",
+          font=("Segoe UI", 10, "bold"), padx=15, pady=6, relief="flat").pack(side="left", padx=8)
+ttk.Button(acoes, text="Print report (PDF)", command=imprimir_relatorio_pdf).pack(side="left", padx=8, ipadx=10)
+ttk.Button(acoes, text="Generate QR Code", command=gerar_qr).pack(side="left", padx=8, ipadx=10)
+ttk.Button(acoes, text="View details", command=abrir_detalhes_tarefa).pack(side="left", padx=8, ipadx=10)
+tk.Button(acoes, text="Delete", command=excluir_tarefa, bg="#c62828", fg="white", font=("Segoe UI", 10, "bold"), padx=15, pady=6, relief="flat").pack(side="left", padx=8)
+
+acoes2 = tk.Frame(lista, bg="#f4f6f8")
+acoes2.grid(row=1, column=0, sticky="w", pady=(8, 0))
+# sincronização com a planilha DUNE_Control (Deposition Control + Efficiency Test)
+tk.Button(acoes2, text="⟳  Sync Leptons Control Sheet", command=lambda: importar_eficiencia_planilha(janela),
+          bg="#5e35b1", fg="white", font=("Segoe UI", 10, "bold"), relief="flat", cursor="hand2", padx=15, pady=6,
+          activebackground="#5e35b1", activeforeground="white").pack(side="left", padx=(0, 8))
+ttk.Button(acoes2, text="Export task (JSON)", command=exportar_tarefa_json).pack(side="left", padx=8, ipadx=10)
+ttk.Button(acoes2, text="Import task (JSON)", command=importar_tarefa_json).pack(side="left", padx=8, ipadx=10)
+ttk.Button(acoes2, text="Export all PDFs", command=gerar_todos_pdfs).pack(side="left", padx=8, ipadx=10)
+ttk.Button(acoes2, text="Backup now", command=backup_agora).pack(side="left", padx=8, ipadx=10)
+lbl_sync_info = tk.Label(lista, text="Sync updates every task from DUNE_Control.xlsx (Deposition Control + Efficiency Test tabs)",
+                         bg="#f4f6f8", fg="#555555", font=("Segoe UI", 8), anchor="w")
+lbl_sync_info.grid(row=2, column=0, sticky="w", pady=(4, 0))
 
 # ---------- BUSCA ----------
 busca_tarefa_var = tk.StringVar()
 filtro_status_var = tk.StringVar(value="All")
-frame_busca = tk.Frame(frame, bg="#f4f6f8")
-frame_busca.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(6, 0))
+frame_busca = tk.Frame(lista, bg="#f4f6f8")
+frame_busca.grid(row=3, column=0, sticky="ew", pady=(12, 0))
 tk.Label(frame_busca, text="Search:", bg="#f4f6f8", font=("Segoe UI", 10, "bold")).pack(side="left")
 entry_busca_tarefa = ttk.Entry(frame_busca, textvariable=busca_tarefa_var, width=40)
 entry_busca_tarefa.pack(side="left", padx=(6, 4))
@@ -5541,10 +5749,24 @@ lbl_contagem_tarefas = tk.Label(frame_busca, text="", bg="#f4f6f8", fg="#555555"
 lbl_contagem_tarefas.pack(side="left", padx=12)
 
 # ---------- TABELA ----------
-cols = ("ID", "PID", "Run", "Status", "Internal Batch", "Responsible", "Deposition Date", "Visual Inspection", "Optical Efficiency", "Cryogenic Immersion")
-tabela = ttk.Treeview(frame, columns=cols, show="headings", height=8)
-tabela.grid(row=4, column=0, columnspan=3, sticky="nsew", pady=(4, 10))
+# Status fica na coluna da árvore (#0) com uma etiqueta colorida: só essa célula tem cor, não a linha toda.
+# Sem o indicador de expandir (as tarefas não têm filhos), a etiqueta fica encostada na borda da célula.
+style.layout("Tarefas.Treeview.Item", [("Treeitem.padding", {"sticky": "nswe", "children": [
+    ("Treeitem.image", {"side": "left", "sticky": ""}),
+    ("Treeitem.focus", {"side": "left", "sticky": "", "children": [("Treeitem.text", {"side": "left", "sticky": ""})]})]})])
+frame_tabela = tk.Frame(lista, bg="#f4f6f8")
+frame_tabela.grid(row=4, column=0, sticky="nsew", pady=(6, 0))
+frame_tabela.columnconfigure(0, weight=1)
+frame_tabela.rowconfigure(0, weight=1)
+cols = ("ID", "PID", "Run", "Internal Batch", "Responsible", "Deposition Date", "Visual Inspection", "Optical Efficiency", "Cryogenic Immersion")
+tabela = ttk.Treeview(frame_tabela, columns=cols, show="tree headings", style="Tarefas.Treeview")
+tabela.grid(row=0, column=0, sticky="nsew")
+sb_tabela = ttk.Scrollbar(frame_tabela, orient="vertical", command=tabela.yview)
+tabela.configure(yscrollcommand=sb_tabela.set)
+sb_tabela.grid(row=0, column=1, sticky="ns")
 
+tabela.heading("#0", text="Status")
+tabela.column("#0", width=LARGURA_BADGE + 12, minwidth=LARGURA_BADGE + 12, stretch=False)
 for c in cols:
     tabela.heading(c, text=c)
     tabela.column(c, anchor="center", width=120)
@@ -5553,12 +5775,10 @@ tabela.column("Internal Batch", width=240)      # lote interno (caixa menor) usa
 tabela.column("ID", width=50)
 tabela.column("PID", width=210)
 tabela.column("Run", width=150)
-for _status, (_texto, _fundo) in CORES_STATUS.items():
-    tabela.tag_configure(_status, foreground=_texto, background=_fundo)
-tabela.bind("<Double-1>", lambda event: carregar_para_edicao())
+tabela.bind("<Double-1>", lambda event: carregar_para_edicao() if tabela.identify_row(event.y) else None)
+tabela.bind("<Return>", lambda event: carregar_para_edicao())
 
-frame.rowconfigure(4, weight=1)
-frame.columnconfigure(1, weight=1)
+lista.rowconfigure(4, weight=1)
 
 carregar_tarefas()
 atualizar_relogio_tela()

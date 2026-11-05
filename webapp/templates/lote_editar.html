@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block titulo %}{{ _('Edit batch {lote}', lote=f.lote_geral or f.id) if f.id else _('New batch') }}{% endblock %}
+{% macro sim_nao(nome, atual, classe='sim-nao') %}<span class="seg {{ classe }}">{% for v in ('Yes', 'No') %}<label><input type="radio" name="{{ nome }}" value="{{ v }}"{{ ' checked' if atual == v }}><span class="op-{{ v|lower }}">{{ v|tr }}</span></label>{% endfor %}</span>{% endmacro %}
+{% macro data(nome, valor) %}<span class="com-hoje"><input name="{{ nome }}" value="{{ valor }}" placeholder="DD/MM/YYYY" class="data"><button type="button" class="botao mini-botao" data-hoje>{{ _("Today") }}</button></span>{% endmacro %}
+{% block conteudo %}
+{% set voltar = url_for('lote', lote_id=f.id) if f.id else url_for('lotes_lista') %}
+<div class="trilha">
+  <a href="{{ url_for('lotes_lista') }}">{{ _("All batches") }}</a>
+  {% if f.id %}<span class="sep">›</span><a href="{{ voltar }}">{{ f.lote_geral or 'ID ' ~ f.id }}</a>{% endif %}
+  <span class="sep">›</span><b>{{ _('Edit') if f.id else _('New batch') }}</b>
+</div>
+
+<form id="form-lote" method="post" action="{{ url_for('lote_gravar') }}" enctype="multipart/form-data" autocomplete="off"
+      data-prefixo="{{ chegada.PREFIXO_CAIXA }}" data-digitos="{{ chegada.DIGITOS_CAIXA }}">
+  <input type="hidden" name="lote_id" value="{{ f.id or '' }}">
+  <input type="hidden" name="lote_fornecedor" value="{{ f.lote_fornecedor }}">
+
+  <div class="cabecalho">
+    <div>
+      <h1>{% if f.id %}{{ _("Edit batch {lote}", lote=f.lote_geral) }}{% else %}{{ _("New batch") }}{% endif %}</h1>
+      <div class="sub">{% if f.id %}<span class="mono">{{ tracking or _('no tracking ID yet') }}</span> · {{ _("record ID") }} {{ f.id }} · {% endif %}{{ _("OPTO batch arrival record · everything is saved together with <b>Save</b>") }}</div>
+    </div>
+    <div class="acoes">
+      <a class="botao" href="{{ voltar }}" data-sair>{{ _("Cancel") }}</a>
+      <button class="botao primario" type="submit">{{ _("Save") }}</button>
+    </div>
+  </div>
+
+  {% for e in erros %}<div class="aviso-flash erro">{{ e }}</div>{% endfor %}
+  {% for a in avisos %}<div class="aviso-flash aviso">{{ a }}</div>{% endfor %}
+  {% if faltando %}
+  <div class="aviso-flash aviso">
+    <b>{{ _("{n} of {total} small boxes have no internal lot code ({prefixo}000X).", n=faltando, total=f.internos|length, prefixo=chegada.PREFIXO_CAIXA) }}</b>
+    {{ _("Boxes without a code cannot be chosen for deposition. Register them in the table below, or:") }}
+    <div class="linha-botoes">
+      <button class="botao primario" type="submit" name="faltando" value="preencher">{{ _("Fill them with the box numbers and save") }}</button>
+      <button class="botao" type="submit" name="faltando" value="deixar">{{ _("Save without them") }}</button>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="dupla">
+    <div class="cartao">
+      <h2>{{ _("General OPTO batch information") }}</h2>
+      <div class="grade-campos duas">
+        <label>{{ _("OPTO batch (general batch ID)") }}<input name="lote_geral" value="{{ f.lote_geral }}" required class="mono"></label>
+        <label>{{ _("Arrival date") }}{{ data('data_recebimento', f.data_recebimento) }}</label>
+        <label>{{ _("Responsible") }}<input name="responsavel" value="{{ f.responsavel }}"></label>
+        <label>{{ _("Supplier / company") }}<input name="fornecedor" value="{{ f.fornecedor }}"></label>
+        <label>{{ _("Total number of filters (calculated)") }}<input name="total_filtros" value="{{ f.total_filtros }}" readonly class="num" tabindex="-1"></label>
+      </div>
+    </div>
+    <div class="cartao">
+      <h2>{{ _("Small boxes inside the general batch") }}</h2>
+      <div class="grade-campos duas">
+        <label>{{ _("Small box capacity (filters per box)") }}<input name="capacidade_caixa_menor" value="{{ f.capacidade_caixa_menor }}" class="num" inputmode="numeric"></label>
+        <label>{{ _("Number of small boxes in the batch") }}<input name="numero_caixas_menores" value="{{ f.numero_caixas_menores }}" class="num" inputmode="numeric"></label>
+      </div>
+      <div class="linha-botoes">
+        <button type="button" class="botao" id="recalcular">{{ _("Recalculate (capacity × boxes)") }}</button>
+        <span class="info-lotes" id="calculo">{{ _("Small boxes:") }} –</span>
+      </div>
+      <p class="nota">{{ _("Total filters = capacity × number of small boxes (the count can be changed per box below). Each small box is registered as {prefixo}000X (internal lot) under the OPTO batch.", prefixo=chegada.PREFIXO_CAIXA) }}</p>
+    </div>
+  </div>
+
+  <div class="cartao">
+    <div class="linha-secao"><h2 style="margin: 0">{{ _("Internal lots (one per small box)") }}</h2>
+      <span class="direita"><b id="estado-internos" class="suave">Internal lots: –</b></span></div>
+    <p class="nota" style="margin-top: 0">{{ _("Register each small box as {prefixo}000X (type only the number). The OPTO batch name is fixed; the internal lot is chosen in the sample form (Add batch / internal lot…).", prefixo=chegada.PREFIXO_CAIXA) }}</p>
+    <div class="rolagem">
+      <table class="tabela-caixas" id="caixas">
+        <thead><tr><th>{{ _("Box") }}</th><th>{{ _("OPTO batch (fixed)") }}</th><th>{{ _("Internal lot code") }}</th><th class="num">{{ _("Filters") }}</th><th>{{ _("Notes") }}</th></tr></thead>
+        <tbody>
+        {% for it in f.internos %}
+          <tr>
+            <td class="mono"><b>{{ '%02d'|format(it.caixa) }}</b></td>
+            <td class="mono suave" data-opto>{{ f.lote_geral }}</td>
+            <td><span class="codigo-caixa"><span class="mono">{{ chegada.PREFIXO_CAIXA }}</span><input name="cx_num_{{ it.caixa }}" value="{{ it.num }}" class="mono" inputmode="numeric"><input type="hidden" name="cx_orig_{{ it.caixa }}" value="{{ it.orig }}"></span></td>
+            <td><input name="cx_filtros_{{ it.caixa }}" value="{{ it.filtros }}" class="num" inputmode="numeric"></td>
+            <td><input name="cx_obs_{{ it.caixa }}" value="{{ it.obs }}" class="obs-caixa"></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <div class="vazio-tabela" id="sem-caixas"{% if f.internos %} hidden{% endif %}>{{ _("Enter the small box capacity and the number of small boxes.") }}</div>
+    </div>
+    <div class="linha-botoes">
+      <button type="button" class="botao" id="preencher">{{ _("Fill empty rows ({prefixo}0001…)", prefixo=chegada.PREFIXO_CAIXA) }}</button>
+      <button type="button" class="botao" id="limpar-codigos">{{ _("Clear codes") }}</button>
+    </div>
+  </div>
+
+  <div class="grade-cartoes">
+    <div class="cartao">
+      <h2>{{ _("Substrate information") }}</h2>
+      <div class="grade-campos uma">
+        <label>Material<input name="material" value="{{ f.material }}"></label>
+        <label>{{ _("Dimensions") }}<input name="dimensoes" value="{{ f.dimensoes }}"></label>
+        <label>{{ _("Thickness") }}<input name="espessura" value="{{ f.espessura }}"></label>
+        <label>{{ _("Finishing type") }}<select name="tipo_acabamento">
+          {% for a in chegada.ACABAMENTOS %}<option{{ ' selected' if f.tipo_acabamento == a }}>{{ a }}</option>{% endfor %}
+          {% if f.tipo_acabamento not in chegada.ACABAMENTOS %}<option selected>{{ f.tipo_acabamento }}</option>{% endif %}</select></label>
+      </div>
+    </div>
+    <div class="cartao">
+      <h2>{{ _("Arrival inspection") }}</h2>
+      <table class="tabela-perguntas">
+        <tr><td>{{ _("Broken filters?") }}</td><td>{{ sim_nao('filtros_quebrados', f.filtros_quebrados, 'nao-sim') }}</td></tr>
+        <tr><td>{{ _("Quantity matches supplier?") }}</td><td>{{ sim_nao('quantidade_confere', f.quantidade_confere) }}</td></tr>
+        <tr><td>{{ _("Cleaning procedure verified?") }}</td><td>{{ sim_nao('procedimento_limpeza', f.procedimento_limpeza) }}</td></tr>
+      </table>
+      <div class="grade-campos uma">
+        <label>{{ _("Inspection result") }}<select name="resultado_inspecao">
+          {% for r in chegada.RESULTADOS %}<option{{ ' selected' if f.resultado_inspecao == r }}>{{ r }}</option>{% endfor %}
+          {% if f.resultado_inspecao not in chegada.RESULTADOS %}<option selected>{{ f.resultado_inspecao }}</option>{% endif %}</select></label>
+      </div>
+    </div>
+    <div class="cartao">
+      <h2>{{ _("Traceability document") }}</h2>
+      <div class="grade-campos uma">
+        <label>{{ _("Supplier control file (path on this computer)") }}<input name="arquivo_controle" value="{{ f.arquivo_controle }}" class="mono pequeno"></label>
+        <label>{{ _("Upload a new file") }}<input type="file" name="arquivo_novo" accept=".pdf,.xlsx,.xls,.csv,.docx,.txt,*/*"></label>
+      </div>
+      <p class="nota">{{ _('PDF, Excel, CSV, Word or text. An uploaded file is copied to the <span class="mono">arquivos_lotes</span> folder and replaces the path above.') }}
+        {% if f.id and f.arquivo_controle %}<br><a href="{{ url_for('lote_arquivo', lote_id=f.id) }}" target="_blank">{{ _("Open the saved file") }}</a>{% endif %}</p>
+    </div>
+  </div>
+
+  <div class="cartao">
+    <h2>{{ _("Observations") }}</h2>
+    <textarea name="observacoes" rows="4">{{ f.observacoes }}</textarea>
+  </div>
+
+  <div class="barra-salvar">
+    <span id="estado-form" class="suave">{{ _("No unsaved changes") }}</span>
+    <a class="botao" href="{{ voltar }}" data-sair>{{ _("Cancel") }}</a>
+    <button class="botao primario" type="submit">{{ _("Save") }}</button>
+  </div>
+</form>
+
+<script src="{{ url_for('static', filename='lote.js') }}"></script>
+{% endblock %}

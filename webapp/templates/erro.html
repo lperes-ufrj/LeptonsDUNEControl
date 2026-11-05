@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block titulo %}{{ _("Error") }}{% endblock %}
+{% block conteudo %}
+<div class="trilha"><a href="{{ url_for('lista') }}">{{ _("All samples") }}</a></div>
+<div class="cartao"><h2>{{ mensagem }}</h2><a href="{{ url_for('lista') }}">{{ _("Back to the sample list") }}</a></div>
+{% endblock %}

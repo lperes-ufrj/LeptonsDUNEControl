@@ -1,0 +1,9 @@
+{# botões EN | PT: o idioma fica guardado no navegador (cookie) e vale também na tela de login #}
+{% macro troca_idioma() %}
+<span class="idioma" title="{{ _('Language of the screens (reports and PDFs stay in English)') }}">
+  {% for cod, nome in (('en', 'EN'), ('pt', 'PT')) %}
+  <a href="{{ url_for('trocar_idioma', cod=cod, proxima=aqui) }}" class="{{ 'ativo' if idioma == cod }}"
+     lang="{{ 'pt-BR' if cod == 'pt' else 'en' }}" data-sair>{{ nome }}</a>
+  {% endfor %}
+</span>
+{% endmacro %}

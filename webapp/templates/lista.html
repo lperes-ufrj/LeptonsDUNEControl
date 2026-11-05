@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block titulo %}{{ _("Samples") }}{% endblock %}
+{% block conteudo %}
+<div class="trilha">
+  <a href="{{ url_for('lista') }}">{{ _("All samples") }}</a>
+  {% if lote is not none %}<span class="sep">›</span><a href="{{ url_for('lista', lote=lote) }}">{{ lote or _('No batch yet') }}</a>{% endif %}
+  {% if interno %}<span class="sep">›</span><b>{{ interno }}</b>{% endif %}
+</div>
+
+<div class="cabecalho">
+  <div>
+    <h1>{% if interno %}{{ interno }}{% elif lote is not none %}{{ lote or _('No batch yet') }}{% else %}{{ _('Deposition samples') }}{% endif %}</h1>
+    <div class="sub">
+      {% if tarefas|length == total %}{{ _("{n} samples", n=total) }}{% else %}{{ _("showing {n} of {total} samples", n=tarefas|length, total=total) }}{% endif %}
+      · {{ _("ID = run number") }}{% if run %} · run <span class="mono">{{ run }}</span> ({{ _("more than one sample") }}){% endif %}{% if q %} · {{ _("search") }} <span class="mono">“{{ q }}”</span>{% endif %}
+    </div>
+  </div>
+  <div class="acoes">
+    <span class="grupo">
+      {% set base_args = {'q': q} if q else {} %}
+      <a href="{{ url_for('lista', lote=lote, interno=interno or None, **base_args) }}" class="{{ 'ativo' if not st }}">{{ _("All") }}</a>
+      {% for s in STATUS_TODOS %}
+      <a href="{{ url_for('lista', status=s, lote=lote, interno=interno or None, **base_args) }}" class="{{ 'ativo' if st == s }}">
+        {{ s }} <span class="n">{{ contagem[s] }}</span></a>
+      {% endfor %}
+    </span>
+  </div>
+</div>
+
+<div class="barra-acoes">
+  <a class="botao primario" href="{{ url_for('nova_tarefa') }}">＋ {{ _("New sample") }}</a>
+  <a class="botao" href="{{ url_for('sincronizar') }}">⟳ Sync Leptons Control Sheet</a>
+  <a class="botao" href="{{ url_for('importar_json') }}">{{ _("Import sample (JSON)") }}</a>
+  <form method="post" action="{{ url_for('todos_pdfs') }}"
+        onsubmit='this.querySelector("button").disabled = true; this.querySelector("button").textContent = T("Generating PDFs…"); return confirm({{ _("Generate the PDF report of all {n} depositions? This may take a minute.", n=total)|tojson }})'>
+    <button class="botao">{{ _("Export all PDFs") }}</button></form>
+  <form method="post" action="{{ url_for('backup_agora') }}"><button class="botao">{{ _("Backup now") }}</button></form>
+</div>
+
+<div class="cartao rolagem" style="padding: 6px 8px">
+  <table class="tabela-tarefas">
+    <thead>
+      <tr>
+        <th>Status</th><th>ID</th><th>PID</th><th>Run</th><th>OPTO batch</th><th>{{ _("Responsible") }}</th>
+        <th>Deposition</th><th>Visual insp.</th><th>Cryogenic</th><th>Efficiency</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in tarefas %}
+      {% set link = url_for('tarefa', tarefa_id=t.id) %}
+      <tr onclick="location.href='{{ link }}'">
+        <td><span class="pill st-{{ t.status|lower|replace(' ', '-') }}">{{ t.status }}</span></td>
+        <td class="id"><a href="{{ link }}">{{ t.numero or '–' }}</a></td>
+        <td class="mono">{{ t.pid or '–' }}</td>
+        <td class="mono suave">{{ t.run or '–' }}</td>
+        {% set optos = t.lotes|map(attribute='opto')|select|unique|list %}
+        {% set internos = t.lotes|map(attribute='interno')|select|list %}
+        <td class="mono"{% if internos %} title="Internal lot(s): {{ internos|join(', ') }}"{% endif %}>{{ optos|join(', ') if optos else '–' }}</td>
+        <td>{{ t.responsavel or '–' }}</td>
+        <td class="mono">{{ t.data or '–' }}</td>
+        <td>
+          <div class="mini"><span class="barra"><span style="width: {{ (100 * t.visual / N_FILTROS)|round }}%"></span></span>
+            <span class="mono pequeno">{{ t.visual }}/{{ N_FILTROS }}</span></div>
+        </td>
+        <td><span class="pill es-{{ t.imersao }}">{{ TXT_ESTADO[t.imersao]|tr }}</span></td>
+        <td><span class="pill es-{{ t.eficiencia }}">{{ TXT_ESTADO[t.eficiencia]|tr }}</span></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="10" class="vazio-tabela">{{ _("No sample matches this filter.") }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

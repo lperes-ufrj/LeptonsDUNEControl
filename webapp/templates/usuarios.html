@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block titulo %}{{ _("Users") }}{% endblock %}
+{% block conteudo %}
+<div class="cabecalho"><div><h1>{{ _("Manage users") }}</h1>
+  <div class="sub">{{ _("The same users as the desktop programs (usuarios.db). New users choose their own password at the first login.") }}</div></div></div>
+<div class="cartao rolagem">
+  <table>
+    <thead><tr><th>Username</th><th>{{ _("Full name") }}</th><th>{{ _("Role") }}</th><th>{{ _("Active") }}</th><th>{{ _("Last login") }}</th><th></th></tr></thead>
+    <tbody>
+    {% for id_, user, nome, perfil, ativo, ult in lista %}
+      <tr class="{{ '' if ativo else 'inativo' }}">
+        <td class="mono"><b>{{ user }}</b></td>
+        <td colspan="2">
+          <form method="post" action="{{ url_for('editar_usuario', user_id=id_) }}" class="linha-form">
+            <input name="nome" value="{{ nome }}" required>
+            <select name="perfil">{% for p in perfis %}<option{{ ' selected' if p == perfil }}>{{ p }}</option>{% endfor %}</select>
+            <button class="botao mini-botao">{{ _("Save") }}</button>
+          </form></td>
+        <td>{{ ('Yes' if ativo else 'No')|tr }}</td>
+        <td class="mono pequeno">{{ ult or '–' }}</td>
+        <td class="acoes-linha">
+          <details class="menu-reset"><summary class="botao mini-botao">{{ _("Reset password") }}</summary>
+            <form method="post" action="{{ url_for('redefinir_senha', user_id=id_) }}" class="linha-form">
+              <input type="password" name="senha" placeholder="{{ _('Temporary password') }}" required autocomplete="new-password">
+              <input type="password" name="senha2" placeholder="{{ _('Repeat') }}" required autocomplete="new-password">
+              <button type="button" class="botao mini-botao" data-gerar-senha title="{{ _('Fill in a simple random temporary password') }}">{{ _("Generate") }}</button>
+              <button class="botao mini-botao">{{ _("Set") }}</button></form></details>
+          <form method="post" action="{{ url_for('ativar_desativar', user_id=id_) }}"
+                onsubmit='return confirm({{ (_("Deactivate user {user}?\nRecords made by this user are kept.", user=user) if ativo else _("Activate user {user}?\nRecords made by this user are kept.", user=user))|tojson }})'>
+            <button class="botao mini-botao {{ 'perigo' if ativo }}">{{ _('Deactivate') if ativo else _('Activate') }}</button></form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="cartao">
+  <h2>{{ _("New user") }}</h2>
+  {# uma linha só: os campos lado a lado e o botão no fim (em telas estreitas quebra em duas colunas) #}
+  <form method="post" action="{{ url_for('novo_usuario') }}" class="form-login form-novo-usuario">
+    <label>Username<input name="username" required pattern="[A-Za-z0-9._\-]{3,30}" title="{{ _('3 to 30 letters, numbers, dot, dash or underscore') }}"></label>
+    <label>{{ _("Full name") }}<input name="nome" required></label>
+    <label>{{ _("Role") }}<select name="perfil">{% for p in perfis %}<option>{{ p }}</option>{% endfor %}</select></label>
+    <label>{{ _("Temporary password") }}
+      <span class="campo-com-botao"><input type="password" name="senha" required autocomplete="new-password" minlength="{{ min_senha }}"
+          placeholder="{{ _('min. {n} characters', n=min_senha) }}">
+        <button type="button" class="botao mini-botao" data-gerar-senha title="{{ _('Fill in a simple random temporary password') }}">{{ _("Generate") }}</button></span></label>
+    <label>{{ _("Repeat password") }}<input type="password" name="senha2" required autocomplete="new-password"></label>
+    <button class="botao primario">{{ _("Create") }}</button>
+  </form>
+  <p class="nota" id="senha-gerada" hidden>{{ _("Give this temporary password to the user: they choose their own password at the first login.") }}</p>
+</div>
+<script>
+  // senha temporária simples: 8 caracteres sem os que se confundem (0/o, 1/l/i), em dois grupos de 4 (ex.: k7mp-3wx9)
+  (function () {
+    const ALFA = "abcdefghjkmnpqrstuvwxyz23456789";
+    function gerar() {
+      const v = new Uint32Array(8);
+      crypto.getRandomValues(v);
+      return [...v].map((x) => ALFA[x % ALFA.length]).join("").replace(/^(.{4})/, "$1-");
+    }
+    document.querySelectorAll("[data-gerar-senha]").forEach((b) => b.addEventListener("click", (ev) => {
+      ev.preventDefault();                    // dentro de um <label>: não passa o clique para o campo
+      const form = b.closest("form"), senha = gerar();
+      form.querySelectorAll('input[name="senha"], input[name="senha2"]').forEach((i) => { i.value = senha; i.type = "text"; });
+      const campo = form.querySelector('input[name="senha"]');
+      campo.focus();
+      campo.select();
+      if (form.classList.contains("form-novo-usuario")) document.getElementById("senha-gerada").hidden = false;
+    }));
+  })();
+</script>
+{% endblock %}
