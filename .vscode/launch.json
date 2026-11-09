@@ -2,42 +2,16 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Browser app (leptons_web)",
+      "name": "Web app (Flask dev server)",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/leptons_web.py",
+      "module": "flask",
+      "args": ["--app", "webapp.app:criar_app()", "run", "--port", "8780", "--no-reload", "--no-debugger"],
+      "env": { "LEPTONS_CONFIG": "${workspaceFolder}/leptons.conf", "FLASK_DEBUG": "1" },
       "python": "${workspaceFolder}/.venv/bin/python",
-      "windows": {
-        "python": "${workspaceFolder}/.venv/Scripts/python.exe"
-      },
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
-      "justMyCode": true
-    },
-    {
-      "name": "Deposition tasks (tela_tarefas v9)",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${workspaceFolder}/tela_tarefas_deposicao_integrada_lotes_lab_opto_22-10-2026_v9_login.py",
-      "python": "${workspaceFolder}/.venv/bin/python",
-      "windows": {
-        "python": "${workspaceFolder}/.venv/Scripts/python.exe"
-      },
-      "cwd": "${workspaceFolder}",
-      "console": "integratedTerminal",
-      "justMyCode": true
-    },
-    {
-      "name": "Batch arrival control (controle_lotes v13)",
-      "type": "debugpy",
-      "request": "launch",
-      "program": "${workspaceFolder}/controle_lotes_chegada_opto_v13_login_22-10-2026.py",
-      "python": "${workspaceFolder}/.venv/bin/python",
-      "windows": {
-        "python": "${workspaceFolder}/.venv/Scripts/python.exe"
-      },
-      "cwd": "${workspaceFolder}",
-      "console": "integratedTerminal",
+      "jinja": true,
       "justMyCode": true
     },
     {
@@ -45,10 +19,8 @@
       "type": "debugpy",
       "request": "launch",
       "program": "${file}",
+      "env": { "LEPTONS_CONFIG": "${workspaceFolder}/leptons.conf" },
       "python": "${workspaceFolder}/.venv/bin/python",
-      "windows": {
-        "python": "${workspaceFolder}/.venv/Scripts/python.exe"
-      },
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal"
     }

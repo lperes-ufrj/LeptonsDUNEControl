@@ -1,15 +1,14 @@
 """Tarefa como formulário (ler do banco / do navegador / de um .json), validação e gravação.
 
-Mesmas regras do programa de mesa: o PID identifica a tarefa, ao menos um lote, massas das posições 2/3/14;
-densidades, perdas de massa da imersão e condições da eficiência são calculadas ao gravar; gravar uma tarefa já
-revisada apaga a revisão (volta a 'To be reviewed').
+Regras: o PID identifica a tarefa, ao menos um lote, massas das posições 2/3/14; densidades, perdas de massa da
+imersão e condições da eficiência são calculadas ao gravar; gravar uma tarefa já revisada apaga a revisão (volta a
+'To be reviewed').
 """
 import json
 import re
-import sqlite3
 from datetime import datetime
 
-from . import banco, dados, lotes, retirados
+from . import dados, db, lotes, retirados
 from .i18n import t
 
 AMOSTRAS = dados.AMOSTRAS
@@ -18,6 +17,7 @@ LIMITE_PERDA_PCT = dados.LIMITE_PERDA_PCT
 LIMITE_EFICIENCIA = dados.LIMITE_EFICIENCIA
 IDADE_MAX_REFERENCIA_DIAS = 183             # vida máxima do substrato de referência (6 meses)
 TIPOS_FILTRO = ("Substrate", "Substrate + dichroic")
+TIPOS_ANTIGOS = {"Substrato": "Substrate", "Substrato+dicroico": "Substrate + dichroic"}   # .json antigos
 
 # campos de cada filtro da inspeção visual: (nome no formulário, coluna no banco, opções)
 CAMPOS_FILTRO = [
@@ -98,67 +98,65 @@ def vazio(responsavel=""):
     }
 
 
-def _um(con, sql, params):
-    r = con.execute(sql, params).fetchone()
-    return dict(r) if r else {}
-
-
-def de_conexao(con, tarefa_id):
-    """Formulário com a tarefa lida da conexão (banco real ou cópia em memória vinda de um .json); None se não existir."""
-    con.row_factory = sqlite3.Row
-    t = _um(con, "SELECT * FROM tarefas WHERE id = ?", (tarefa_id,))
-    if not t:
+def _inteiro(v):
+    """Número da posição/filtro gravado (int no banco; num .json antigo pode vir como texto); None se não for."""
+    try:
+        return int(v)
+    except (TypeError, ValueError):
         return None
+
+
+def _formulario(tarefa_id, t, tabelas, reuso):
+    """Formulário a partir da linha de 'tarefas' (t) e das linhas das tabelas ligadas ({tabela: [dicts] em ordem de
+    id}, as de TABELAS_TAREFA), vindas do banco ou de um .json exportado."""
+    linhas = lambda tab: tabelas.get(tab) or []
     f = vazio()
     f["id"] = tarefa_id
-    linhas_lotes = [dict(r) for r in con.execute("SELECT * FROM tarefa_lotes WHERE id_tarefa = ? ORDER BY id", (tarefa_id,))]
-    f["lotes"] = lotes.entradas_gravadas(linhas_lotes, t.get("lote_entrada_id"), t.get("codigo_lote"))
+    f["lotes"] = lotes.entradas_gravadas(linhas("tarefa_lotes"), t.get("lote_entrada_id"), t.get("codigo_lote"))
     # de onde veio cada filtro (só com mais de um lote): {nº do filtro: índice em f["lotes"]}
-    for r in con.execute("SELECT * FROM filtro_origem WHERE id_tarefa = ? ORDER BY filtro", (tarefa_id,)):
-        i = next((i for i, e in enumerate(f["lotes"]) if lotes.mesma_origem(dict(r), e)), None)
-        if i is not None and r["filtro"] in range(1, dados.N_FILTROS + 1):
-            f["origens"][r["filtro"]] = i
+    for r in sorted(linhas("filtro_origem"), key=lambda r: _inteiro(r.get("filtro")) or 0):
+        n = _inteiro(r.get("filtro"))
+        i = next((i for i, e in enumerate(f["lotes"]) if lotes.mesma_origem(r, e)), None)
+        if i is not None and n in range(1, dados.N_FILTROS + 1):
+            f["origens"][n] = i
     # filtros limpos (de um lote de limpeza) em cada posição: {nº do filtro: id em filtro_retirado}
-    try:
-        f["reuso"] = {r["usado_filtro"]: r["id"] for r in con.execute(
-            "SELECT id, usado_filtro FROM filtro_retirado WHERE usado_tarefa_id = ?", (tarefa_id,))}
-    except sqlite3.OperationalError:            # cópia em memória de um .json: sem a tabela
-        pass
+    f["reuso"] = dict(reuso)
     f.update(data=_txt(t.get("data_inicio")), pid=_txt(t.get("codigo_tarefa")), posicao=_txt(t.get("position_range")),
              responsavel=_txt(t.get("responsavel")), obs=_txt(t.get("observacoes")),
-             tipo=banco.TIPOS_ANTIGOS.get(t.get("descricao"), t.get("descricao")) or "Substrate",
+             tipo=TIPOS_ANTIGOS.get(t.get("descricao"), t.get("descricao")) or "Substrate",
              massa_ptp=_txt(t.get("massa_ptp_g")), lote_ptp=_txt(t.get("lote_ptp")),
              anexos=[a for a in (t.get("anexos_txt") or "").split(";") if a.strip()])
-    for r in con.execute("SELECT * FROM massa_posicoes WHERE id_tarefa = ?", (tarefa_id,)):
-        if r["posicao"] in f["massas"]:
-            f["massas"][r["posicao"]] = {"antes": _txt(r["massa_antes"]), "depois": _txt(r["massa_depois"])}
+    for r in linhas("massa_posicoes"):
+        p = _inteiro(r.get("posicao"))
+        if p in f["massas"]:
+            f["massas"][p] = {"antes": _txt(r.get("massa_antes")), "depois": _txt(r.get("massa_depois"))}
 
-    cab = _um(con, "SELECT * FROM inspecao_visual_cab WHERE id_tarefa = ? ORDER BY id LIMIT 1", (tarefa_id,))
+    cab = (linhas("inspecao_visual_cab") or [{}])[0]
     f["run"] = _txt(cab.get("run_evaporation"))
     f["pid"] = f["pid"] or _txt(cab.get("box_pid"))
     for k in ("pid_p02", "pid_p03", "pid_p14"):
         f[k] = _txt(cab.get(k))
     f["insp"] = {k: _txt(cab.get(k)) for k in CAMPOS_INSPECAO}
-    for r in con.execute("SELECT * FROM inspecao_visual_filtros WHERE id_tarefa = ?", (tarefa_id,)):
-        if r["filtro"] in f["filtros"]:
-            f["filtros"][r["filtro"]] = {c: _txt(r[col]) for c, col, _ in CAMPOS_FILTRO}
+    for r in linhas("inspecao_visual_filtros"):
+        n = _inteiro(r.get("filtro"))
+        if n in f["filtros"]:
+            f["filtros"][n] = {c: _txt(r.get(col)) for c, col, _ in CAMPOS_FILTRO}
 
     f["im"] = {k: _txt(t.get(col)) for k, col in CAMPOS_IMERSAO.items()}
-    for r in con.execute("SELECT * FROM imersao_massas WHERE id_tarefa = ?", (tarefa_id,)):
-        if r["amostra"] in f["im_massas"]:
-            f["im_massas"][r["amostra"]] = {"antes": _txt(r["massa_antes"]), "depois": _txt(r["massa_depois"])}
-    for r in con.execute("SELECT item, aprovado FROM imersao_itens WHERE id_tarefa = ?", (tarefa_id,)):
-        if r["item"] in f["im_itens"]:
-            f["im_itens"][r["item"]] = _txt(r["aprovado"])
+    for r in linhas("imersao_massas"):
+        if r.get("amostra") in f["im_massas"]:
+            f["im_massas"][r["amostra"]] = {"antes": _txt(r.get("massa_antes")), "depois": _txt(r.get("massa_depois"))}
+    for r in linhas("imersao_itens"):
+        if r.get("item") in f["im_itens"]:
+            f["im_itens"][r["item"]] = _txt(r.get("aprovado"))
 
-    te = _um(con, "SELECT * FROM eficiencia_teste WHERE id_tarefa = ? ORDER BY id LIMIT 1", (tarefa_id,))
+    te = (linhas("eficiencia_teste") or [{}])[0]
     f["ef"] = {k: _txt(te.get(col)) for k, col in CAMPOS_EF.items()}
-    for r in con.execute("SELECT * FROM eficiencia_amostras WHERE id_tarefa = ?", (tarefa_id,)):
-        if r["amostra"] in f["ef_amostras"]:
-            r = dict(r)
-            f["ef_amostras"][r["amostra"]] = {"testada": _txt(r["testada"]), "antes": _txt(r["massa_antes"]),
-                                              "depois": _txt(r["massa_depois"]), "area": dados.area_amostra_ef(r),
-                                              "x": _txt(r["eficiencia"])}
+    for r in linhas("eficiencia_amostras"):
+        if r.get("amostra") in f["ef_amostras"]:
+            f["ef_amostras"][r["amostra"]] = {"testada": _txt(r.get("testada")), "antes": _txt(r.get("massa_antes")),
+                                              "depois": _txt(r.get("massa_depois")), "area": dados.area_amostra_ef(r),
+                                              "x": _txt(r.get("eficiencia"))}
     f["signoff"] = {"por": _txt(t.get("qa_signoff_por")), "data": _txt(t.get("qa_signoff_data"))}
     f["legado"] = {"eficiencia_ok": t.get("eficiencia_optica_ok") or "Não",
                    "valor_eficiencia": _txt(t.get("valor_eficiencia")), "imersao_ok": t.get("imersao_criogenica_ok") or "Não"}
@@ -166,11 +164,19 @@ def de_conexao(con, tarefa_id):
 
 
 def ler(tarefa_id):
-    con = banco.conectar()
+    """Formulário com a tarefa gravada; None se não existir."""
+    con = db.conectar()
     try:
-        return de_conexao(con, tarefa_id)
+        t = con.execute("SELECT * FROM tarefas WHERE id = ?", (tarefa_id,)).fetchone()
+        if t is None:
+            return None
+        tabelas = {tab: [dict(r) for r in con.execute(f"SELECT * FROM {tab} WHERE id_tarefa = ? ORDER BY id", (tarefa_id,))]
+                   for tab in TABELAS_TAREFA}
+        reuso = {r["usado_filtro"]: r["id"] for r in con.execute(
+            "SELECT id, usado_filtro FROM filtro_retirado WHERE usado_tarefa_id = ?", (tarefa_id,))}
     finally:
         con.close()
+    return _formulario(tarefa_id, dict(t), tabelas, reuso)
 
 
 def de_formulario(form):
@@ -218,7 +224,7 @@ def de_formulario(form):
 
 
 def validar(f):
-    """Erros que impedem gravar (os mesmos do programa de mesa)."""
+    """Erros que impedem gravar."""
     erros = []
     if not f["lotes"]:
         erros.append(t("Select at least one batch."))
@@ -238,7 +244,7 @@ def outras_com_run(f):
     numero = dados.numero_run(f["run"])
     if not numero:
         return []
-    con = banco.conectar()
+    con = db.conectar()
     try:
         return [r["id_tarefa"] for r in con.execute("SELECT id_tarefa, run_evaporation FROM inspecao_visual_cab")
                 if dados.numero_run(r["run_evaporation"]) == numero and r["id_tarefa"] != f["id"]]
@@ -250,7 +256,7 @@ def revisao_gravada(tarefa_id):
     """(revisado por, data) gravados, ou None se a tarefa não foi revisada."""
     if tarefa_id is None:
         return None
-    con = banco.conectar()
+    con = db.conectar()
     try:
         r = con.execute("SELECT qa_signoff_por, qa_signoff_data FROM tarefas WHERE id = ?", (tarefa_id,)).fetchone()
     finally:
@@ -301,7 +307,7 @@ def gravar(f, tarefa_id=None):
         "lote_ptp": f["lote_ptp"], "qa_signoff_por": f["signoff"]["por"], "qa_signoff_data": f["signoff"]["data"],
         **{col: f["im"][k] for k, col in CAMPOS_IMERSAO.items()},
     }
-    con = banco.conectar()
+    con = db.conectar()
     try:
         cur = con.cursor()
         if tarefa_id is None:
@@ -374,7 +380,7 @@ def atualizar_status(tarefa_id):
     if d is None:
         return None, []
     if d["tarefa"].get("status") != d["status"]:
-        con = banco.conectar()
+        con = db.conectar()
         try:
             con.execute("UPDATE tarefas SET status = ? WHERE id = ?", (d["status"], tarefa_id))
             con.commit()
@@ -385,7 +391,7 @@ def atualizar_status(tarefa_id):
 
 def excluir(tarefa_id):
     """Apaga a tarefa e tudo ligado a ela. Retorna o PID apagado (None se não existia)."""
-    con = banco.conectar()
+    con = db.conectar()
     try:
         r = con.execute("SELECT codigo_tarefa FROM tarefas WHERE id = ?", (tarefa_id,)).fetchone()
         if r is None:
@@ -402,7 +408,7 @@ def excluir(tarefa_id):
 
 def marcar_revisada(tarefa_id, nome):
     """QA sign-off (nome e data de hoje): a tarefa passa a Completed."""
-    con = banco.conectar()
+    con = db.conectar()
     try:
         con.execute("UPDATE tarefas SET qa_signoff_por = ?, qa_signoff_data = ?, status = ? WHERE id = ?",
                     (nome, hoje(), dados.STATUS_COMPLETO, tarefa_id))
@@ -412,7 +418,7 @@ def marcar_revisada(tarefa_id, nome):
 
 
 def limpar_revisao(tarefa_id):
-    con = banco.conectar()
+    con = db.conectar()
     try:
         con.execute("UPDATE tarefas SET qa_signoff_por = '', qa_signoff_data = '' WHERE id = ?", (tarefa_id,))
         con.commit()
@@ -432,8 +438,8 @@ def nome_arquivo(texto):
 
 
 def exportar_json(tarefa_id, exportado_por):
-    """Tudo o que o banco tem da tarefa, no mesmo formato do programa de mesa (pode ser importado de volta)."""
-    con = banco.conectar()
+    """Tudo o que o banco tem da tarefa, num .json que pode ser importado de volta (aqui ou em outra instalação)."""
+    con = db.conectar()
     try:
         t = con.execute("SELECT * FROM tarefas WHERE id = ?", (tarefa_id,)).fetchone()
         if t is None:
@@ -465,7 +471,7 @@ def ler_json(texto):
 def tarefas_com_pid(pid):
     if not pid:
         return []
-    con = banco.conectar()
+    con = db.conectar()
     try:
         return [r[0] for r in con.execute("SELECT id FROM tarefas WHERE codigo_tarefa = ? ORDER BY id", (pid,))]
     finally:
@@ -473,40 +479,16 @@ def tarefas_com_pid(pid):
 
 
 def formulario_do_json(d):
-    """Formulário com a tarefa do arquivo (cópia em memória com o mesmo formato do banco). Os IDs dos lotes mudam
-    entre computadores: os lotes são achados pelos códigos."""
-    con = banco.conectar()
-    try:
-        esquema = {r[0]: r[1] for r in con.execute("SELECT name, sql FROM sqlite_master WHERE type = 'table'")}
-    finally:
-        con.close()
-    mem = sqlite3.connect(":memory:")
-    try:
-        def inserir(tab, linha):
-            colunas = [c[1] for c in mem.execute(f"PRAGMA table_info({tab})")]
-            linha = {k: v for k, v in linha.items() if k in colunas and k != "id"}
-            if linha:
-                mem.execute(f"INSERT INTO {tab} ({', '.join(linha)}) VALUES ({', '.join('?' * len(linha))})",
-                            tuple(linha.values()))
-            else:
-                mem.execute(f"INSERT INTO {tab} DEFAULT VALUES")
-
-        for tab in ["tarefas"] + TABELAS_TAREFA:
-            mem.execute(esquema[tab])
-        inserir("tarefas", dict(d["task"], lote_entrada_id=None))
-        for tab in TABELAS_TAREFA:
-            for linha in (d.get("tables") or {}).get(tab) or []:
-                linha = dict(linha, id_tarefa=1)
-                if tab in ("tarefa_lotes", "filtro_origem"):
-                    linha.update(lote_id=None, lote_interno_id=None)
-                inserir(tab, linha)
-        f = de_conexao(mem, 1)
-    finally:
-        mem.close()
-    if f is None:
-        raise ValueError("The file has no sample data.")
-    f["id"] = None
-    return f
+    """Formulário com a tarefa do arquivo (ler_json). Os IDs dos lotes mudam entre bancos: os lotes são achados
+    pelos códigos. O .json não leva os filtros limpos (reuso)."""
+    tabelas = {}
+    for tab in TABELAS_TAREFA:
+        linhas = [dict(l) for l in (d.get("tables") or {}).get(tab) or [] if isinstance(l, dict)]
+        if tab in ("tarefa_lotes", "filtro_origem"):
+            for l in linhas:
+                l.update(lote_id=None, lote_interno_id=None)
+        tabelas[tab] = linhas
+    return _formulario(None, dict(d["task"], lote_entrada_id=None), tabelas, {})
 
 
 def lotes_ausentes(d):

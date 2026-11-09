@@ -119,11 +119,12 @@
     <div class="cartao">
       <h2>{{ _("Traceability document") }}</h2>
       <div class="grade-campos uma">
-        <label>{{ _("Supplier control file (path on this computer)") }}<input name="arquivo_controle" value="{{ f.arquivo_controle }}" class="mono pequeno"></label>
-        <label>{{ _("Upload a new file") }}<input type="file" name="arquivo_novo" accept=".pdf,.xlsx,.xls,.csv,.docx,.txt,*/*"></label>
+        <input type="hidden" name="arquivo_controle" value="{{ f.arquivo_controle }}">
+        <label>{{ _("Supplier control file") }}<input type="file" name="arquivo_novo" accept=".pdf,.xlsx,.xls,.csv,.docx,.txt,*/*"></label>
       </div>
-      <p class="nota">{{ _('PDF, Excel, CSV, Word or text. An uploaded file is copied to the <span class="mono">arquivos_lotes</span> folder and replaces the path above.') }}
-        {% if f.id and f.arquivo_controle %}<br><a href="{{ url_for('lote_arquivo', lote_id=f.id) }}" target="_blank">{{ _("Open the saved file") }}</a>{% endif %}</p>
+      <p class="nota">{{ _("PDF, Excel, CSV, Word or text. A new file replaces the saved one.") }}
+        {% if f.arquivo_controle %}<br>{{ _("Saved file:") }} <span class="mono">{{ f.arquivo_controle|basename }}</span>
+        {% if f.id %}· <a href="{{ url_for('lote_arquivo', lote_id=f.id) }}" target="_blank">{{ _("Open the saved file") }}</a>{% endif %}{% endif %}</p>
     </div>
   </div>
 

@@ -226,7 +226,6 @@ td.centro, th.centro { text-align: center; }
 .botao.primario:hover { background: #a3ab00; border-color: #a3ab00; color: #1d1f00; }
 .erro-login { color: var(--vermelho); background: var(--vermelho-fundo); border: 1px solid #f5c6c2; border-radius: 7px; padding: 8px 11px; margin: 0 0 14px; }
 .aviso-login { background: var(--lima-claro); border: 1px solid #dfe49a; border-radius: 7px; padding: 10px 12px; color: var(--texto-2); }
-.quit-login { text-align: center; margin-top: 16px; }
 button.link { background: none; border: none; color: var(--suave); font: 13px var(--sans); cursor: pointer; text-decoration: underline; }
 button.link:hover { color: var(--acento); }
 

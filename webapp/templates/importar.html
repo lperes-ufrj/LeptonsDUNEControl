@@ -16,7 +16,7 @@
 {% else %}
 <div class="cartao">
   <h2>{{ _("Import sample (JSON)") }}</h2>
-  <p>{{ _("Choose a file created by <b>Export sample (JSON)</b> (in this app or in the desktop program). The sample opens in the form for review; it is saved only when you click Save.") }}</p>
+  <p>{{ _("Choose a file created by <b>Export sample (JSON)</b> (here or in another installation). The sample opens in the form for review; it is saved only when you click Save.") }}</p>
   <form method="post" enctype="multipart/form-data" class="linha-botoes">
     <input type="file" name="arquivo" accept=".json,application/json" required>
     <button class="botao primario">{{ _("Load") }}</button>

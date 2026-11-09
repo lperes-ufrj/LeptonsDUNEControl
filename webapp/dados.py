@@ -1,21 +1,15 @@
-"""Leitura do banco de tarefas (somente leitura) e as regras de situação da tarefa.
+"""Leitura das amostras (tarefas) e as regras de situação de cada uma.
 
-As regras são as mesmas do programa de mesa (tela_tarefas_..._v9_login.py): pendências, estados da imersão
-criogênica e da eficiência óptica, Incomplete -> To be reviewed -> Completed.
+Regras: pendências, estados da imersão criogênica e da eficiência óptica, Incomplete -> To be reviewed -> Completed.
 """
-import os
 import re
-import sqlite3
 from pathlib import Path
 
+from . import config, db
 from .i18n import t as tr
 
-BASE = Path(__file__).resolve().parent.parent          # pasta do projeto (logos e programas)
-# pasta dos dados (.db, PDFs, backups...): a do projeto; LEPTONS_DADOS aponta outra (ex.: cópia para testes)
-PASTA = Path(os.environ.get("LEPTONS_DADOS") or BASE).resolve()
-DB_TAREFAS = PASTA / "rastreabilidade.db"
-DB_LOTES = PASTA / "lotes.db"
-DB_USUARIOS = PASTA / "usuarios.db"
+BASE = Path(__file__).resolve().parent.parent          # pasta do projeto (logos)
+PASTA = config.PASTA_DADOS                             # arquivos gerados e enviados (PDFs, anexos...)
 
 AREA_FILTRO_CM2 = 77.0
 N_FILTROS = 28
@@ -59,13 +53,6 @@ STATUS_TODOS = (STATUS_INCOMPLETO, STATUS_REVISAR, STATUS_COMPLETO)
 TXT_ESTADO = {"approved": "Approved", "rejected": "Rejected", "partial": "In progress", "empty": "Not filled"}
 
 
-def _conectar(caminho):
-    """Abre o banco só para leitura (listas e páginas); as gravações usam banco.conectar()."""
-    conn = sqlite3.connect(caminho.resolve().as_uri() + "?mode=ro", uri=True, timeout=10)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
 def _linhas(conn, sql, params=()):
     return [dict(r) for r in conn.execute(sql, params)]
 
@@ -101,43 +88,27 @@ def densidade(antes, depois, area_cm2=AREA_FILTRO_CM2):
     return (d - a) * 1e6 / ar
 
 
-# ---------------- lotes (banco do programa de chegada de lotes) ----------------
+# ---------------- lotes (aba Batches) ----------------
 def codigos_lotes_internos():
     """Códigos atuais dos lotes internos e de limpeza ({id: código}), que podem ter sido renomeados."""
-    internos, limpezas = {}, {}
-    if not DB_LOTES.exists():
-        return internos, limpezas
-    conn = _conectar(DB_LOTES)
+    conn = db.conectar()
     try:
         internos = {r["id"]: r["codigo_interno"] for r in conn.execute("SELECT id, codigo_interno FROM lotes_internos")}
         limpezas = {r["id"]: r["codigo_interno"] for r in conn.execute("SELECT id, codigo_interno FROM lotes_limpeza")}
-    except sqlite3.Error:
-        pass
     finally:
         conn.close()
     return internos, limpezas
 
 
 def lotes_opto():
-    """{código do lote OPTO: dados do lote} do programa de chegada de lotes."""
-    if not DB_LOTES.exists():
-        return {}
-    conn = _conectar(DB_LOTES)
+    """{código do lote OPTO: dados do lote}."""
+    conn = db.conectar()
     try:
-        cols = {c[1].lower(): c[1] for c in conn.execute("PRAGMA table_info(lotes)")}
-        pega = lambda *nomes: next((cols[n] for n in nomes if n in cols), None)
-        c_lote = pega("lote_geral", "lote", "tracking_id")
-        resultado = {}
-        for r in conn.execute("SELECT * FROM lotes"):
-            r = dict(r)
-            resultado[r.get(c_lote)] = {
-                "lote": r.get(c_lote), "chegada": r.get(pega("data_recebimento", "data")) or "",
-                "empresa": r.get(pega("fornecedor")) or "", "lote_empresa": r.get(pega("lote_fornecedor")) or "",
-                "filtros": r.get(pega("total_filtros", "quantidade")) or "",
-            }
-        return resultado
-    except sqlite3.Error:
-        return {}
+        return {r["lote_geral"]: {"lote": r["lote_geral"], "chegada": r["data_recebimento"] or "",
+                                  "empresa": r["fornecedor"] or "", "lote_empresa": r["lote_fornecedor"] or "",
+                                  "filtros": r["total_filtros"] or ""}
+                for r in conn.execute("SELECT lote_geral, data_recebimento, fornecedor, lote_fornecedor, total_filtros "
+                                      "FROM lotes")}
     finally:
         conn.close()
 
@@ -160,27 +131,38 @@ def _lotes_por_tarefa(conn):
     return por_tarefa
 
 
-# ---------------- uma tarefa ----------------
-def _dados_tarefa(conn, t, lotes):
-    """Tudo o que o banco tem da tarefa (linha de 'tarefas' já lida), no formato das regras abaixo."""
-    tid = t["id"]
-    cab = _linhas(conn, "SELECT * FROM inspecao_visual_cab WHERE id_tarefa = ? ORDER BY id LIMIT 1", (tid,))
-    ef = _linhas(conn, "SELECT * FROM eficiencia_teste WHERE id_tarefa = ? ORDER BY id LIMIT 1", (tid,))
-    return {
-        "id": tid,
+# ---------------- amostras ----------------
+def dados_tarefas(conn, tarefa_id=None):
+    """Tudo o que o banco tem de cada tarefa (ou só de tarefa_id), no formato das regras abaixo.
+
+    Lê cada tabela uma vez para todas as tarefas: com o banco em outro servidor, uma consulta por tarefa e por
+    tabela deixaria a lista lenta com muitas amostras."""
+    onde, params = ("WHERE id_tarefa = ?", (tarefa_id,)) if tarefa_id is not None else ("", ())
+
+    def por_tarefa(tabela, ordem):
+        grupos = {}
+        for r in _linhas(conn, f"SELECT * FROM {tabela} {onde} ORDER BY {ordem}", params):
+            grupos.setdefault(r["id_tarefa"], []).append(r)
+        return lambda tid: grupos.get(tid, [])
+
+    tarefas = _linhas(conn, "SELECT * FROM tarefas" + (" WHERE id = ?" if tarefa_id is not None else ""), params)
+    lotes = _lotes_por_tarefa(conn)
+    cab, ef = por_tarefa("inspecao_visual_cab", "id"), por_tarefa("eficiencia_teste", "id")
+    massas, filtros = por_tarefa("massa_posicoes", "posicao, id"), por_tarefa("inspecao_visual_filtros", "filtro, id")
+    im_massas, im_itens = por_tarefa("imersao_massas", "id"), por_tarefa("imersao_itens", "id")
+    ef_amostras = por_tarefa("eficiencia_amostras", "id")
+    return [{
+        "id": t["id"],
         "tarefa": t,
-        "lotes": lotes,
-        "cab": cab[0] if cab else {},
-        "massas": {r["posicao"]: r for r in _linhas(
-            conn, "SELECT * FROM massa_posicoes WHERE id_tarefa = ? ORDER BY posicao", (tid,))},
-        "filtros": {r["filtro"]: r for r in _linhas(
-            conn, "SELECT * FROM inspecao_visual_filtros WHERE id_tarefa = ? ORDER BY filtro", (tid,))},
-        "im_massas": {r["amostra"]: r for r in _linhas(conn, "SELECT * FROM imersao_massas WHERE id_tarefa = ?", (tid,))},
-        "im_itens": {r["item"]: r["aprovado"] for r in _linhas(
-            conn, "SELECT item, aprovado FROM imersao_itens WHERE id_tarefa = ?", (tid,))},
-        "ef_teste": ef[0] if ef else {},
-        "ef_amostras": {r["amostra"]: r for r in _linhas(conn, "SELECT * FROM eficiencia_amostras WHERE id_tarefa = ?", (tid,))},
-    }
+        "lotes": lotes.get(t["id"], []),
+        "cab": (cab(t["id"]) or [{}])[0],
+        "massas": {r["posicao"]: r for r in massas(t["id"])},
+        "filtros": {r["filtro"]: r for r in filtros(t["id"])},
+        "im_massas": {r["amostra"]: r for r in im_massas(t["id"])},
+        "im_itens": {r["item"]: r["aprovado"] for r in im_itens(t["id"])},
+        "ef_teste": (ef(t["id"]) or [{}])[0],
+        "ef_amostras": {r["amostra"]: r for r in ef_amostras(t["id"])},
+    } for t in tarefas]
 
 
 def resumo_visual(d):
@@ -329,11 +311,9 @@ def _resumo(d):
 
 def listar_tarefas():
     """Todas as tarefas (maior run primeiro; tarefas sem run no topo)."""
-    conn = _conectar(DB_TAREFAS)
+    conn = db.conectar()
     try:
-        lotes = _lotes_por_tarefa(conn)
-        tarefas = [_resumo(_dados_tarefa(conn, dict(t), lotes.get(t["id"], [])))
-                   for t in conn.execute("SELECT * FROM tarefas")]
+        tarefas = [_resumo(d) for d in dados_tarefas(conn)]
     finally:
         conn.close()
     tarefas.sort(key=lambda r: (r["numero"] == "", int(r["numero"] or 0), r["id"]), reverse=True)
@@ -343,11 +323,8 @@ def listar_tarefas():
 def _origem_filtros(conn, tarefa_id):
     """{nº do filtro: {tipo, opto, interno}} gravados na janela Filter origin (códigos atuais dos lotes internos)."""
     internos, limpezas = codigos_lotes_internos()
-    try:
-        linhas = conn.execute("SELECT filtro, tipo_lote, codigo_lote, lote_interno_id, codigo_lote_interno "
-                              "FROM filtro_origem WHERE id_tarefa = ?", (tarefa_id,)).fetchall()
-    except sqlite3.OperationalError:            # banco ainda sem a tabela
-        return {}
+    linhas = conn.execute("SELECT filtro, tipo_lote, codigo_lote, lote_interno_id, codigo_lote_interno "
+                          "FROM filtro_origem WHERE id_tarefa = ?", (tarefa_id,)).fetchall()
     origem = {}
     for r in linhas:
         tipo = r["tipo_lote"] or "opto"
@@ -359,12 +336,12 @@ def _origem_filtros(conn, tarefa_id):
 
 def ler_tarefa(tarefa_id):
     """Tudo de uma tarefa, com os estados e as pendências já calculados; None se não existir."""
-    conn = _conectar(DB_TAREFAS)
+    conn = db.conectar()
     try:
-        t = conn.execute("SELECT * FROM tarefas WHERE id = ?", (tarefa_id,)).fetchone()
-        if t is None:
+        achadas = dados_tarefas(conn, tarefa_id)
+        if not achadas:
             return None
-        d = _dados_tarefa(conn, dict(t), _lotes_por_tarefa(conn).get(tarefa_id, []))
+        d = achadas[0]
         origem = _origem_filtros(conn, tarefa_id)
     finally:
         conn.close()

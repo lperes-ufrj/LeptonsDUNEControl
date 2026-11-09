@@ -1,19 +1,19 @@
 """Sincronização da planilha DUNE_Control.xlsx (abas Deposition Control e Efficiency Test) com as tarefas.
 
-Mesmas regras do programa de mesa: a planilha nunca apaga o que já foi gravado, mostra só as diferenças antes de
-aplicar e pode criar as tarefas das evaporações que ainda não estão no programa.
+A planilha nunca apaga o que já foi gravado; as diferenças são mostradas antes de aplicar, e as evaporações que
+ainda não estão no programa podem virar tarefas novas.
 """
 import re
 from datetime import datetime
 
-from . import banco, dados, tarefas
+from . import dados, tarefas
+from .db import conectar
 from .relatorio import coletar_dados_relatorio, diferenca_massas_ef, estado_eficiencia_dados
 
 AMOSTRAS_EFICIENCIA = dados.AMOSTRAS
 LIMITE_EFICIENCIA = dados.LIMITE_EFICIENCIA
 STATUS_INCOMPLETO = dados.STATUS_INCOMPLETO
 area_amostra_ef = dados.area_amostra_ef
-conectar = banco.conectar
 
 
 def converter_float(valor):

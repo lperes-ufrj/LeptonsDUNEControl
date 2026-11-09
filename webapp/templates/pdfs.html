@@ -4,7 +4,6 @@
 <div class="trilha"><a href="{{ url_for('lista') }}">{{ _("All samples") }}</a><span class="sep">›</span><b>{{ _("Export all PDFs") }}</b></div>
 <div class="cartao">
   <h2>{{ _("{n} PDF(s) saved", n=feitos) }}</h2>
-  <p>{{ _("Folder on this computer:") }} <span class="mono">{{ pasta }}</span></p>
   {% if erros %}<h3 class="nao">{{ _("{n} failed", n=erros|length) }}</h3><ul>{% for e in erros %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
   <div class="linha-botoes">
     {% if feitos %}<a class="botao primario" href="{{ url_for('zip_pdfs', pasta=pasta.name) }}">{{ _("Download all (ZIP)") }}</a>{% endif %}

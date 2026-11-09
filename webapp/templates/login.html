@@ -13,7 +13,7 @@
     <img class="logo-login" src="{{ url_for('static', filename='leptons.png') }}" alt="LEPTONS Lab">
     <h1>Deposition Control</h1>
     {% if sem_usuarios %}
-    <p class="aviso-login">{{ _("No users are registered yet. Open the desktop program once to create the first administrator account, then reload this page.") }}</p>
+    <p class="aviso-login">{{ _("No users are registered yet. Ask the system administrator to create the first Admin account, then reload this page.") }}</p>
     {% else %}
     <p class="suave">{{ _('Choose a new password before continuing.') if trocar else _('Sign in with your lab username and password.') }}</p>
     {% if erro %}<p class="erro-login">{{ erro }}</p>{% endif %}
@@ -39,10 +39,6 @@
       <img src="{{ url_for('logo', nome='esquerda.png', recorte=1) }}" alt="Unicamp">
       <img src="{{ url_for('logo', nome='direita.png', recorte=1) }}" alt="DUNE">
     </div>
-    <form action="{{ url_for('sair') }}" method="post" class="quit-login"
-          onsubmit='return confirm({{ _("Close the Deposition Control browser app?")|tojson }})'>
-      <button class="link">{{ _("Quit program") }}</button>
-    </form>
     <div class="idioma-login">{{ troca_idioma() }}</div>
   </main>
 </body>

@@ -17,7 +17,7 @@ COOKIE = "idioma"
 
 
 def idioma():
-    """'pt' ou 'en' (padrão), conforme o cookie; fora de uma página (servidor do QR code, PDFs) é sempre 'en'.
+    """'pt' ou 'en' (padrão), conforme o cookie; fora de uma página (ex.: PDFs) é sempre 'en'.
 
     g.so_ingles = True força o inglês numa página (ex.: os CSV das estatísticas, em inglês como os relatórios).
     """
@@ -31,7 +31,7 @@ def _traduzido(texto):
         return texto
     if texto in PT:
         return PT[texto]
-    # mensagens montadas fora daqui (ex.: as do leptons_auth, com números no meio)
+    # mensagens montadas fora daqui (ex.: as de auth.py, com números no meio)
     for padrao, modelo in PADROES:
         m = re.fullmatch(padrao, texto)
         if m:

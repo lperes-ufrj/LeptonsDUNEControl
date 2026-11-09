@@ -4,21 +4,14 @@ venv/
 __pycache__/
 *.pyc
 
-# Lab data: databases and generated outputs stay out of git
+# Local configuration (database password, session key)
+leptons.conf
+
+# Local data folder (data_dir in leptons.conf) and old SQLite data kept for the migration
+dados/
 *.db
 *.db-journal
 *.db-wal
 *.db-shm
 backups/
 relatorios_pdf/
-qrcodes_lotes/
-
-# Windows download markers
-*Zone.Identifier
-
-# Images with report links/tokens or real names (kept locally only)
-qr_tarefa_*.png
-arquivos antigos/pdf_exemplo.png
-
-# Exported task files (lab data)
-tarefas_json/

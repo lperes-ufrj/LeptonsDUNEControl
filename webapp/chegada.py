@@ -1,7 +1,7 @@
-"""Cadastro de lotes no navegador: o mesmo do programa de chegada de lotes (controle_lotes v13), no mesmo lotes.db.
+"""Cadastro de lotes (aba Batches): chegada dos lotes OPTO e lotes de limpeza do Leptons.
 
 Lote OPTO (lote geral) com as caixas menores, cada uma registrada como lote interno DUNE-CX-000X, e os lotes de
-limpeza do Leptons (DUNE-LP-000X). Mesmas tabelas, regras, códigos de auditoria e PDFs do programa de mesa.
+limpeza do Leptons (DUNE-LP-000X). Tabelas lotes, lotes_internos e lotes_limpeza.
 """
 import csv
 import io
@@ -10,7 +10,7 @@ from datetime import datetime
 
 from PIL import Image, ImageChops
 
-from . import banco, dados, pdf
+from . import dados, db, pdf
 from .i18n import t
 
 PREFIXO_CAIXA = "DUNE-CX-"            # caixas menores (lotes internos): DUNE-CX-0001, DUNE-CX-0002, ...
@@ -27,43 +27,6 @@ CAMPOS_LOTE = ("lote_geral", "lote_fornecedor", "data_recebimento", "responsavel
                "tipo_acabamento", "filtros_quebrados", "quantidade_confere", "procedimento_limpeza",
                "resultado_inspecao", "arquivo_controle", "observacoes", "data_hora_registro")
 CAMPOS_LIMPEZA = ("num", "data", "resp", "filtros", "origem", "ptp", "proc", "resultado", "obs")
-
-
-def conectar():
-    return banco.abrir(dados.DB_LOTES)
-
-
-def inicializar():
-    """Cria/atualiza as tabelas do lotes.db como o programa de mesa (os dois abrem o mesmo arquivo)."""
-    con = conectar()
-    try:
-        con.executescript("""
-            CREATE TABLE IF NOT EXISTS lotes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, tracking_id TEXT, lote_geral TEXT, lote_fornecedor TEXT,
-                data_recebimento TEXT, responsavel TEXT, fornecedor TEXT, total_filtros TEXT,
-                numero_caixas_menores TEXT, capacidade_caixa_menor TEXT, material TEXT, dimensoes TEXT,
-                espessura TEXT, tipo_acabamento TEXT, filtros_quebrados TEXT, quantidade_confere TEXT,
-                procedimento_limpeza TEXT, resultado_inspecao TEXT, arquivo_controle TEXT, observacoes TEXT,
-                qr_code_path TEXT, qrcodes_caixas_dir TEXT, data_hora_registro TEXT);
-            CREATE TABLE IF NOT EXISTS lotes_internos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, id_lote INTEGER, numero_caixa INTEGER, codigo_interno TEXT,
-                quantidade_filtros TEXT, observacoes TEXT, lote_fornecedor TEXT);
-            CREATE TABLE IF NOT EXISTS lotes_limpeza (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, codigo_interno TEXT, data_limpeza TEXT, responsavel TEXT,
-                quantidade_filtros TEXT, origem TEXT, remocao_ptp TEXT, procedimento TEXT, resultado TEXT,
-                observacoes TEXT, data_hora_registro TEXT);
-        """)
-        # bancos antigos: o SQLite não diferencia maiúsculas em nomes de colunas (Fornecedor = fornecedor)
-        existentes = {c[1].lower() for c in con.execute("PRAGMA table_info(lotes)")}
-        for nome in CAMPOS_LOTE + ("tracking_id", "qr_code_path", "qrcodes_caixas_dir"):
-            if nome not in existentes:
-                con.execute(f"ALTER TABLE lotes ADD COLUMN {nome} TEXT")
-                existentes.add(nome)
-        if "lote_fornecedor" not in {c[1].lower() for c in con.execute("PRAGMA table_info(lotes_internos)")}:
-            con.execute("ALTER TABLE lotes_internos ADD COLUMN lote_fornecedor TEXT")
-        con.commit()
-    finally:
-        con.close()
 
 
 def data_hora_atual():
@@ -102,18 +65,16 @@ def numero_do_codigo(codigo, prefixo=PREFIXO_CAIXA):
 # LOTES OPTO
 # =====================================================================
 _SQL_LISTA = """
-    SELECT id, tracking_id, lote_geral, fornecedor AS fornecedor, total_filtros, numero_caixas_menores,
+    SELECT id, tracking_id, lote_geral, fornecedor, total_filtros, numero_caixas_menores,
            (SELECT COUNT(*) FROM lotes_internos li WHERE li.id_lote = lotes.id) AS n_internos,
            data_recebimento, responsavel, resultado_inspecao, data_hora_registro
     FROM lotes
-"""          # "fornecedor AS": bancos antigos têm a coluna Fornecedor e o SQLite devolve o nome declarado
+"""
 
 
 def listar(termo=""):
-    """Lotes, mais recentes primeiro; a busca é a mesma do programa de mesa (inclui os códigos internos)."""
-    if not dados.DB_LOTES.exists():
-        return []
-    con = dados._conectar(dados.DB_LOTES)
+    """Lotes, mais recentes primeiro; a busca inclui os códigos internos."""
+    con = db.conectar()
     try:
         if not termo:
             return dados._linhas(con, _SQL_LISTA + " ORDER BY id DESC")
@@ -135,9 +96,7 @@ def internos(con, registro_id):
 
 def ler(registro_id):
     """O lote gravado (todas as colunas) com os lotes internos; None se não existir."""
-    if not dados.DB_LOTES.exists():
-        return None
-    con = dados._conectar(dados.DB_LOTES)
+    con = db.conectar()
     try:
         r = con.execute("SELECT * FROM lotes WHERE id = ?", (registro_id,)).fetchone()
         if r is None:
@@ -151,7 +110,7 @@ def ler(registro_id):
 
 
 def vazio(responsavel):
-    """Formulário de um lote novo, com os valores iniciais do programa de mesa."""
+    """Formulário de um lote novo, com os valores iniciais."""
     f = {c: "" for c in CAMPOS_LOTE}
     f.update(id=None, data_recebimento=data_atual(), responsavel=responsavel, fornecedor="OPTO",
              capacidade_caixa_menor=str(CAPACIDADE_PADRAO), tipo_acabamento="Polished", resultado_inspecao="Approved",
@@ -160,7 +119,7 @@ def vazio(responsavel):
 
 
 def formulario(registro_id):
-    """Formulário de um lote gravado. Registros antigos sem capacidade usam a padrão, como no programa de mesa."""
+    """Formulário de um lote gravado. Registros antigos sem capacidade usam a padrão."""
     lote = ler(registro_id)
     if lote is None:
         return None
@@ -257,7 +216,7 @@ def conflito_codigos(itens):
 
 
 def validar(f):
-    """Erros que impedem a gravação (as mesmas regras do programa de mesa)."""
+    """Erros que impedem a gravação."""
     erros = list(f.get("erros_caixas") or [])
     if not f["lote_geral"]:
         erros.append(t("Enter the OPTO batch (general batch ID)."))
@@ -279,7 +238,7 @@ def caixas_sem_codigo(f):
 
 
 def preencher_codigos(f):
-    """Caixas sem código recebem DUNE-CX-000X com o número da caixa (o 'Yes' do programa de mesa)."""
+    """Caixas sem código recebem DUNE-CX-000X com o número da caixa."""
     for it in caixas_sem_codigo(f):
         it["codigo"] = codigo_do_numero(it["caixa"])
         it["num"] = numero_do_codigo(it["codigo"])
@@ -290,7 +249,7 @@ def gravar(f, registro_id=None):
     Retorna (id, tracking_id)."""
     f["data_hora_registro"] = data_hora_atual()
     valores = tuple(f[c] for c in CAMPOS_LOTE)
-    con = conectar()
+    con = db.conectar()
     try:
         with con:
             if registro_id is None:
@@ -329,7 +288,7 @@ def gravar(f, registro_id=None):
 
 def excluir(registro_id):
     """Apaga o lote e os lotes internos. Retorna (tracking_id, lote OPTO) ou None se não existir."""
-    con = conectar()
+    con = db.conectar()
     try:
         r = con.execute("SELECT tracking_id, lote_geral FROM lotes WHERE id = ?", (registro_id,)).fetchone()
         if r is None:
@@ -344,7 +303,7 @@ def excluir(registro_id):
 
 def usos(registro_id=None, limpeza_id=None):
     """Amostras de deposição que usaram o lote OPTO (ou o lote de limpeza): [(id da amostra, id do lote interno)]."""
-    con = dados._conectar(dados.DB_TAREFAS)
+    con = db.conectar()
     try:
         if limpeza_id is not None:
             return [tuple(r) for r in con.execute(
@@ -364,7 +323,7 @@ def usos(registro_id=None, limpeza_id=None):
 
 def usos_todos():
     """[(id da amostra, id do lote OPTO)] de todas as deposições (para contar as amostras de cada lote)."""
-    con = dados._conectar(dados.DB_TAREFAS)
+    con = db.conectar()
     try:
         linhas = [tuple(r) for r in con.execute(
             "SELECT id_tarefa, lote_id FROM tarefa_lotes WHERE COALESCE(tipo_lote, 'opto') = 'opto' AND lote_id IS NOT NULL")]
@@ -377,15 +336,16 @@ def usos_todos():
 
 
 def csv_texto():
-    """Exportação CSV com as mesmas colunas do programa de mesa."""
-    con = dados._conectar(dados.DB_LOTES)
+    """Exportação CSV dos lotes OPTO."""
+    con = db.conectar()
     try:
         linhas = con.execute("""
             SELECT id, tracking_id, lote_geral, data_recebimento, responsavel, fornecedor, total_filtros,
                    numero_caixas_menores, capacidade_caixa_menor, material, dimensoes, espessura, tipo_acabamento,
                    filtros_quebrados, quantidade_confere, procedimento_limpeza, resultado_inspecao, arquivo_controle,
                    observacoes, data_hora_registro,
-                   (SELECT GROUP_CONCAT(codigo_interno, '; ') FROM lotes_internos li WHERE li.id_lote = lotes.id)
+                   (SELECT GROUP_CONCAT(codigo_interno ORDER BY li.id SEPARATOR '; ') FROM lotes_internos li
+                    WHERE li.id_lote = lotes.id)
             FROM lotes ORDER BY id DESC""").fetchall()
     finally:
         con.close()
@@ -403,7 +363,7 @@ def csv_texto():
 # LOTES DE LIMPEZA DO LEPTONS
 # =====================================================================
 def proximo_numero_limpeza():
-    con = dados._conectar(dados.DB_LOTES)
+    con = db.conectar()
     try:
         maior = 0
         for (codigo,) in con.execute("SELECT codigo_interno FROM lotes_limpeza"):
@@ -445,9 +405,9 @@ def validar_limpeza(f):
         return codigo, t("Number of filters must be an integer greater than zero.")
     if not f["resultado"]:
         return codigo, t("Select the result after cleaning.")
-    con = dados._conectar(dados.DB_LOTES)
+    con = db.conectar()
     try:
-        if con.execute("SELECT id FROM lotes_limpeza WHERE lower(codigo_interno) = lower(?) AND id IS NOT ?",
+        if con.execute("SELECT id FROM lotes_limpeza WHERE lower(codigo_interno) = lower(?) AND NOT (id <=> ?)",
                        (codigo, f["id"])).fetchone():
             return codigo, t("The cleaning lot {codigo} already exists.", codigo=codigo)
     finally:
@@ -458,14 +418,14 @@ def validar_limpeza(f):
 def gravar_limpeza(f, codigo):
     """Grava o lote de limpeza; retorna o id (novo ou o mesmo)."""
     valores = (codigo, f["data"], f["resp"], f["filtros"], f["origem"], f["ptp"], f["proc"], f["resultado"], f["obs"])
-    con = conectar()
+    con = db.conectar()
     try:
         with con:
             if f["id"] is None:
-                con.execute("""INSERT INTO lotes_limpeza (codigo_interno, data_limpeza, responsavel, quantidade_filtros,
-                               origem, remocao_ptp, procedimento, resultado, observacoes, data_hora_registro)
-                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", valores + (data_hora_atual(),))
-                return con.execute("SELECT last_insert_rowid()").fetchone()[0]
+                return con.execute("""INSERT INTO lotes_limpeza (codigo_interno, data_limpeza, responsavel,
+                                      quantidade_filtros, origem, remocao_ptp, procedimento, resultado, observacoes,
+                                      data_hora_registro) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                   valores + (data_hora_atual(),)).lastrowid
             else:
                 con.execute("""UPDATE lotes_limpeza SET codigo_interno = ?, data_limpeza = ?, responsavel = ?,
                                quantidade_filtros = ?, origem = ?, remocao_ptp = ?, procedimento = ?, resultado = ?,
@@ -477,7 +437,7 @@ def gravar_limpeza(f, codigo):
 
 def excluir_limpeza(limpeza_id):
     """Apaga o lote de limpeza; retorna o código, ou None se não existir."""
-    con = conectar()
+    con = db.conectar()
     try:
         r = con.execute("SELECT codigo_interno FROM lotes_limpeza WHERE id = ?", (limpeza_id,)).fetchone()
         if r is None:
@@ -490,7 +450,7 @@ def excluir_limpeza(limpeza_id):
 
 
 # =====================================================================
-# PDFs PARA ARQUIVO (iguais aos do programa de mesa)
+# PDFs PARA ARQUIVO
 # =====================================================================
 def _kit_pdf(landscape_pagina=False):
     """Estilos e funções auxiliares comuns aos PDFs de lotes."""
@@ -674,7 +634,7 @@ def gerar_pdf_limpeza(caminho):
     """PDF de arquivo com a lista de todos os lotes de limpeza do Leptons."""
     k = _kit_pdf(landscape_pagina=True)
     P, H, secao, tabela, Spacer = k["P"], k["H"], k["secao"], k["tabela"], k["Spacer"]
-    con = dados._conectar(dados.DB_LOTES)
+    con = db.conectar()
     try:
         registros = con.execute("""
             SELECT codigo_interno, data_limpeza, responsavel, quantidade_filtros, origem, remocao_ptp,

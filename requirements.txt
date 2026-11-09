@@ -1,5 +1,14 @@
-qrcode>=7.4
-Pillow>=10.0
-reportlab>=4.0
-openpyxl>=3.1
-flask>=3.0
+# Development only: the server uses the Debian 13 packages (deploy/LEIAME.md).
+# Same versions as Debian 13 (trixie), so the code is tested with what runs in production.
+flask==3.1.1
+werkzeug==3.1.3
+jinja2==3.1.6
+markupsafe==2.1.5
+itsdangerous==2.2.0
+click==8.1.8
+blinker==1.9.0
+pymysql==1.1.1
+reportlab==4.3.1
+pillow==11.1.0
+qrcode==8.2
+openpyxl==3.1.5

@@ -110,8 +110,8 @@
   <h2>{{ _("Traceability and notes") }}</h2>
   <dl class="chaves">
     <dt>{{ _("Supplier control file") }}</dt>
-    <dd class="largo">{% if l.arquivo_controle %}{% if arquivo_existe %}<a href="{{ url_for('lote_arquivo', lote_id=l.id) }}" target="_blank">{{ l.arquivo_controle|basename }}</a>{% else %}{{ l.arquivo_controle|basename }} <span class="nao pequeno">{{ _("file not found on this computer") }}</span>{% endif %}
-      <div class="suave pequeno">{{ l.arquivo_controle }}</div>{% else %}–{% endif %}</dd>
+    <dd class="largo">{% if l.arquivo_controle %}{% if arquivo_existe %}<a href="{{ url_for('lote_arquivo', lote_id=l.id) }}" target="_blank">{{ l.arquivo_controle|basename }}</a>{% else %}{{ l.arquivo_controle|basename }} <span class="nao pequeno">{{ _("file not found on the server") }}</span>{% endif %}
+      {% else %}–{% endif %}</dd>
     <dt>{{ _("Observations") }}</dt><dd class="largo texto">{{ l.observacoes|ou_traco }}</dd>
   </dl>
 </div>

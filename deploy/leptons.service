@@ -1,0 +1,25 @@
+# /etc/systemd/system/leptons.service — o programa (gunicorn) atrás do nginx.
+# Um processo com vários threads: o programa guarda na memória, entre duas páginas, as importações de .json e as
+# sincronizações da planilha. Não aumente --workers.
+[Unit]
+Description=Leptons Deposition Control System
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=leptons
+Group=leptons
+WorkingDirectory=/opt/leptons
+Environment=LEPTONS_CONFIG=/etc/leptons/leptons.conf
+ExecStart=/usr/bin/gunicorn --workers 1 --threads 8 --bind 127.0.0.1:8000 --timeout 300 --access-logfile - "webapp.app:criar_app()"
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/leptons
+
+[Install]
+WantedBy=multi-user.target

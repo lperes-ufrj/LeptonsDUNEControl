@@ -1,4 +1,4 @@
-"""Relatório em PDF com todas as informações gravadas da tarefa (pacote reportlab); igual ao do programa de mesa."""
+"""Relatório em PDF com todas as informações gravadas da tarefa (pacote reportlab)."""
 import io
 import os
 from datetime import datetime

@@ -1,38 +1,37 @@
-"""Deposition Control System no navegador (Flask). Roda só neste PC (127.0.0.1).
+"""Deposition Control System (Flask), servido pelo gunicorn atrás do nginx (deploy/LEIAME.md).
 
-Faz tudo o que os programas de mesa faziam: lista e cadastro de tarefas (deposição, inspeção visual, imersão
-criogênica, eficiência óptica), revisão (QA sign-off), relatórios HTML/PDF e QR code, exportar/importar .json,
-sincronizar a planilha DUNE_Control, backup, usuários e registro de auditoria; e, na aba Batches, o cadastro de
-chegada de lotes OPTO (caixas menores / lotes internos) e os lotes de limpeza do Leptons; e a aba Statistics.
+Lista e cadastro de tarefas (deposição, inspeção visual, imersão criogênica, eficiência óptica), revisão (QA
+sign-off), relatórios HTML/PDF e QR code, exportar/importar .json, sincronizar a planilha DUNE_Control, usuários e
+registro de auditoria; na aba Batches, a chegada de lotes OPTO (caixas menores / lotes internos) e os lotes de
+limpeza do Leptons; e as abas Statistics e Projections.
+
+Roda com um processo só (vários threads): as importações de .json e as sincronizações da planilha ficam na memória
+entre duas páginas.
 """
 import csv
 import io
 import json
 import os
 import secrets
-import threading
 import zipfile
 from datetime import date, datetime, timedelta
 from functools import lru_cache, wraps
-from pathlib import Path
 from urllib.parse import urlsplit
 
+import click
 from flask import (Flask, Response, abort, flash, g, redirect, render_template, request, send_file,
                    send_from_directory, session, url_for)
 from PIL import Image, ImageChops
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
 
-import leptons_auth
-
-from . import (backup, banco, chegada, dados, estatisticas, i18n, inicio, lotes, pdf, planilha, projecoes, relatorio,
+from . import (auth, chegada, config, dados, db, estatisticas, i18n, inicio, lotes, pdf, planilha, projecoes, relatorio,
                retirados, tarefas)
 from .i18n import t
 
 LOGOS = ("esquerda.png", "direita.png")
-PROGRAMA = "Deposition Control (browser)"
-LIVRES = {"login", "static", "logo", "sair", "trocar_idioma"}   # páginas que abrem sem login
+LIVRES = {"login", "static", "logo", "trocar_idioma", "relatorio_publico"}   # páginas que abrem sem login
 PERFIS_REVISORES = ("Admin",)                        # quem pode marcar uma tarefa como revisada
-PASTA_JSON = dados.PASTA / "tarefas_json"
 PASTA_ANEXOS = dados.PASTA / "anexos"
 
 # dados guardados entre duas páginas (importação de .json, sincronização da planilha), por código aleatório
@@ -40,24 +39,29 @@ _IMPORTACOES = {}
 _SINCRONIZACOES = {}
 
 
+def arquivo_enviado(caminho, pasta):
+    """Arquivo gravado por um envio (caminho relativo à pasta dos dados), só se estiver dentro de 'pasta'; senão None.
+    O caminho vem do banco, e o formulário pode trazer qualquer texto: nada fora das pastas de envio é servido."""
+    if not caminho:
+        return None
+    p = (dados.PASTA / caminho).resolve()
+    return p if p.is_relative_to(pasta.resolve()) and p.is_file() else None
+
+
 def criar_app():
     app = Flask(__name__)
-    # chave nova a cada execução: fechar o programa encerra todos os logins
-    app.secret_key = secrets.token_hex(32)
+    app.secret_key = config.CHAVE_SESSAO
     app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Strict",
-                      MAX_CONTENT_LENGTH=200 * 1024 * 1024)
-    # mesma lista de usuários dos programas de mesa, qualquer que seja a pasta de onde se rodou
-    leptons_auth.DB_USUARIOS = str(dados.DB_USUARIOS)
-    leptons_auth._programa = PROGRAMA
-    leptons_auth.criar_tabelas()
-    chegada.inicializar()
-    banco.inicializar_banco()
+                      SESSION_COOKIE_SECURE=config.COOKIES_SEGUROS, MAX_CONTENT_LENGTH=200 * 1024 * 1024)
+    # atrás do nginx: o endereço, o protocolo (https) e o IP do usuário vêm dos cabeçalhos X-Forwarded-*
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+    db.criar_tabelas()
 
     def usuario():
         return session.get("usuario")
 
     def registrar(acao, detalhe=""):
-        leptons_auth.registrar_como(usuario(), acao, detalhe)
+        auth.registrar_como(usuario(), acao, detalhe)
 
     def nome_usuario():
         u = usuario() or {}
@@ -89,7 +93,7 @@ def criar_app():
         if not eh_admin():
             registrar("DELETE_DENIED", f"{o_que}: not an Admin")
             return erro_pagina(t("Only an Admin can delete records."), 403)
-        ok, msg, _u = leptons_auth.autenticar(usuario()["username"], request.form.get("senha", ""))
+        ok, msg, _u = auth.autenticar(usuario()["username"], request.form.get("senha", ""))
         if ok:
             return None
         registrar("DELETE_DENIED", f"{o_que}: wrong password")
@@ -129,7 +133,7 @@ def criar_app():
     def globais():
         return {"STATUS_TODOS": dados.STATUS_TODOS, "TXT_ESTADO": dados.TXT_ESTADO, "N_FILTROS": dados.N_FILTROS,
                 "agora": datetime.now().strftime("%Y-%m-%d %H:%M"), "usuario": usuario(), "eh_admin": eh_admin(),
-                "min_senha": leptons_auth.MIN_SENHA, "chegada_resultados": chegada.RESULTADOS,
+                "min_senha": auth.MIN_SENHA, "chegada_resultados": chegada.RESULTADOS,
                 "idioma": i18n.idioma(), "textos_js": i18n.textos_js(),
                 "aqui": request.full_path.rstrip("?") if request.method == "GET" else ""}
 
@@ -281,7 +285,8 @@ def criar_app():
         return formulario(f)
 
     def salvar_envio(arq, pasta):
-        """Grava um arquivo enviado pelo navegador em 'pasta' (nome com data e hora) e retorna o caminho."""
+        """Grava um arquivo enviado pelo navegador em 'pasta' (nome com data e hora) e retorna o caminho relativo à
+        pasta dos dados (é o que o banco guarda)."""
         pasta.mkdir(parents=True, exist_ok=True)
         carimbo = datetime.now().strftime("%Y%m%d_%H%M%S")
         nome = secure_filename(arq.filename) or "file"
@@ -291,10 +296,10 @@ def criar_app():
             destino = pasta / f"{carimbo}_{n}_{nome}"
             n += 1
         arq.save(str(destino))
-        return str(destino)
+        return destino.relative_to(dados.PASTA).as_posix()
 
     def guardar_anexos(f):
-        """Arquivos enviados no formulário: gravados em anexos/ (o banco guarda o caminho, como no programa de mesa)."""
+        """Arquivos enviados no formulário: gravados em anexos/ (o banco guarda o caminho)."""
         for arq in request.files.getlist("novos_anexos"):
             if arq and arq.filename:
                 f["anexos"].append(salvar_envio(arq, PASTA_ANEXOS))
@@ -376,12 +381,13 @@ def criar_app():
 
     @app.route("/sample/<int:tarefa_id>/attachment")
     def anexo(tarefa_id):
-        """Arquivo anexado à tarefa (só os caminhos gravados nela)."""
+        """Arquivo anexado à tarefa (só os caminhos gravados nela, dentro da pasta de anexos)."""
         d = dados.ler_tarefa(tarefa_id)
         caminho = request.args.get("file", "")
-        if d is None or caminho not in (d["tarefa"].get("anexos_txt") or "").split(";") or not os.path.isfile(caminho):
+        arquivo = arquivo_enviado(caminho, PASTA_ANEXOS)
+        if d is None or caminho not in (d["tarefa"].get("anexos_txt") or "").split(";") or arquivo is None:
             abort(404)
-        return send_file(caminho)
+        return send_file(arquivo)
 
     @app.route("/api/batches")
     def api_lotes():
@@ -433,24 +439,17 @@ def criar_app():
         if l is None:
             abort(404)
         por_interno, n_amostras = amostras_que_usaram(chegada.usos(lote_id))
-        arquivo = l.get("arquivo_controle") or ""
         return render_template("lote.html", l=l, por_interno=por_interno, n_amostras=n_amostras,
-                               arquivo_existe=bool(arquivo) and caminho_arquivo(arquivo).is_file(),
+                               arquivo_existe=arquivo_enviado(l.get("arquivo_controle"), chegada.PASTA_ARQUIVOS) is not None,
                                **lateral_lotes(lote_id))
-
-    def caminho_arquivo(caminho):
-        """Caminho gravado no lote (o programa de mesa grava o caminho completo; relativo = pasta dos dados)."""
-        p = Path(caminho).expanduser()
-        return p if p.is_absolute() else dados.PASTA / p
 
     @app.route("/batch/<int:lote_id>/control-file")
     def lote_arquivo(lote_id):
         """Arquivo de controle do fornecedor gravado no lote."""
-        l = chegada.ler(lote_id)
-        caminho = (l or {}).get("arquivo_controle") or ""
-        if not caminho or not caminho_arquivo(caminho).is_file():
+        arquivo = arquivo_enviado((chegada.ler(lote_id) or {}).get("arquivo_controle"), chegada.PASTA_ARQUIVOS)
+        if arquivo is None:
             abort(404)
-        return send_file(str(caminho_arquivo(caminho)))
+        return send_file(arquivo)
 
     def formulario_lote(f, erros=(), avisos=(), faltando=0):
         tracking = (chegada.ler(f["id"]) or {}).get("tracking_id") if f["id"] else ""
@@ -471,11 +470,16 @@ def criar_app():
     @app.route("/batch/save", methods=["POST"])
     def lote_gravar():
         f = chegada.de_formulario(request.form)
-        if f["id"] is not None and chegada.ler(f["id"]) is None:
+        gravado = chegada.ler(f["id"]) if f["id"] is not None else {}
+        if gravado is None:
             abort(404)
+        # arquivo de controle: um envio novo, ou o do formulário só se for um arquivo já enviado (o formulário reaberto
+        # depois de um erro traz o envio anterior); senão fica o gravado
         arq = request.files.get("arquivo_novo")
         if arq and arq.filename:
             f["arquivo_controle"] = salvar_envio(arq, chegada.PASTA_ARQUIVOS)
+        elif arquivo_enviado(f["arquivo_controle"], chegada.PASTA_ARQUIVOS) is None:
+            f["arquivo_controle"] = gravado.get("arquivo_controle") or ""
         erros = chegada.validar(f)
         if erros:
             return formulario_lote(f, erros=erros), 400
@@ -518,10 +522,7 @@ def criar_app():
         pdf.PASTA_PDF.mkdir(parents=True, exist_ok=True)
         nome = chegada.nome_pdf_lote(lote_id, l.get("lote_geral"))
         caminho = pdf.PASTA_PDF / nome
-        try:
-            chegada.gerar_pdf_lote(lote_id, str(caminho))
-        except PermissionError:
-            return erro_pagina(t("Could not write the file. Close the PDF if it is open and try again: {caminho}", caminho=caminho))
+        chegada.gerar_pdf_lote(lote_id, str(caminho))
         return send_file(str(caminho), mimetype="application/pdf", download_name=nome)
 
     @app.route("/batches.csv")
@@ -609,10 +610,7 @@ def criar_app():
     def limpeza_pdf():
         pdf.PASTA_PDF.mkdir(parents=True, exist_ok=True)
         caminho = pdf.PASTA_PDF / "Leptons_cleaning_lots.pdf"
-        try:
-            chegada.gerar_pdf_limpeza(str(caminho))
-        except PermissionError:
-            return erro_pagina(t("Could not write the file. Close the PDF if it is open and try again: {caminho}", caminho=caminho))
+        chegada.gerar_pdf_limpeza(str(caminho))
         return send_file(str(caminho), mimetype="application/pdf", download_name=caminho.name)
 
     # =====================================================================
@@ -707,27 +705,24 @@ def criar_app():
         pdf.PASTA_PDF.mkdir(parents=True, exist_ok=True)
         nome = f"Report_{tarefas.nome_arquivo(d['tarefa'].get('codigo_tarefa'))}_sample{tarefa_id}.pdf"
         caminho = pdf.PASTA_PDF / nome
-        try:
-            pdf.gerar_pdf_relatorio(tarefa_id, str(caminho))
-        except PermissionError:
-            return erro_pagina(t("Could not write the file. Close the PDF if it is open and try again: {caminho}", caminho=caminho))
+        pdf.gerar_pdf_relatorio(tarefa_id, str(caminho))
         return send_file(str(caminho), mimetype="application/pdf", download_name=nome)
+
+    @app.route("/t/<int:tarefa_id>/<codigo>/")
+    @app.route("/t/<int:tarefa_id>/<codigo>/<nome>.html")
+    def relatorio_publico(tarefa_id, codigo, nome="index"):
+        """Link do QR code: as páginas do relatório sem login, só com o código da tarefa no endereço."""
+        if (nome not in relatorio.PAGINAS_RELATORIO or not relatorio.codigo_valido(tarefa_id, codigo)
+                or dados.ler_tarefa(tarefa_id) is None):
+            return relatorio._documento("Not found", "<p>Not found.</p>"), 404
+        return relatorio.renderizar_pagina(tarefa_id, nome)
 
     @app.route("/sample/<int:tarefa_id>/qr")
     def qr(tarefa_id):
         d = dados.ler_tarefa(tarefa_id)
         if d is None:
             abort(404)
-        if relatorio.URL_BASE_RELATORIO:
-            pasta = relatorio.gerar_arquivos_relatorio(tarefa_id)
-            aviso = t("Report files saved in: {pasta}. Publish this folder at {url} so the QR link works.",
-                      pasta=pasta, url=relatorio.URL_BASE_RELATORIO)
-        elif servidor_relatorios_ativo():
-            aviso = t("The link works on devices connected to the same network as this computer, while this program "
-                      "is open. If it does not open, allow Python through the firewall for private networks.")
-        else:
-            aviso = t("The report server could not start on port {porta} (port in use – is the desktop program open? "
-                      "It serves the same links while it is open).", porta=relatorio.SERVIDOR_PORTA)
+        aviso = t("The link opens the report pages without a login, on any device that can reach this server.")
         return render_template("qr.html", d=d, url=relatorio.url_relatorio(tarefa_id), aviso=aviso)
 
     @app.route("/sample/<int:tarefa_id>/qr.png")
@@ -745,9 +740,11 @@ def criar_app():
     @app.route("/pdfs/all", methods=["POST"])
     def todos_pdfs():
         """Gera, de uma vez, o PDF de todas as deposições cadastradas (para arquivo)."""
-        con = banco.conectar()
-        ids = con.execute("SELECT id, codigo_tarefa FROM tarefas ORDER BY id").fetchall()
-        con.close()
+        con = db.conectar()
+        try:
+            ids = con.execute("SELECT id, codigo_tarefa FROM tarefas ORDER BY id").fetchall()
+        finally:
+            con.close()
         pasta = pdf.PASTA_PDF / ("todas_" + datetime.now().strftime("%Y-%m-%d_%H%M%S"))
         pasta.mkdir(parents=True, exist_ok=True)
         feitos, erros = 0, []
@@ -783,8 +780,6 @@ def criar_app():
             abort(404)
         nome = f"Sample_{tarefas.nome_arquivo(d['pid'])}_sample{tarefa_id}.json"
         texto = json.dumps(d, ensure_ascii=False, indent=2)
-        PASTA_JSON.mkdir(parents=True, exist_ok=True)         # cópia local, como no programa de mesa
-        (PASTA_JSON / nome).write_text(texto, encoding="utf-8")
         registrar("TASK_EXPORT_JSON", f"id={tarefa_id} PID={d['pid']} file={nome}")
         return Response(texto, mimetype="application/json",
                         headers={"Content-Disposition": f'attachment; filename="{nome}"'})
@@ -841,7 +836,7 @@ def criar_app():
                     pid=imp["pid"] or "-", arquivo=imp["arquivo"], n=id_mostrado(destino) if destino is not None else "")]
         ausentes = tarefas.lotes_ausentes(imp["dados"])
         if ausentes:
-            avisos.append(t("These batches are not registered on this computer (they are kept with their codes): ")
+            avisos.append(t("These batches are not registered here (they are kept with their codes): ")
                           + ", ".join(ausentes))
         return formulario(f, avisos=avisos, importacao=token)
 
@@ -850,32 +845,20 @@ def criar_app():
     # =====================================================================
     @app.route("/sync", methods=["GET", "POST"])
     def sincronizar():
-        ultimo = banco.ler_config("planilha_eficiencia")
         if request.method == "GET":
-            return render_template("sync.html", ultimo=ultimo)
+            return render_template("sync.html")
         arq = request.files.get("arquivo")
-        caminho_txt = request.form.get("caminho", "").strip()
-        temporario = None
+        if not arq or not arq.filename:
+            return render_template("sync.html", erro=t("Choose the spreadsheet file.")), 400
+        nome = arq.filename
+        temporario = dados.PASTA / f".sync_{secrets.token_hex(6)}.xlsx"
         try:
-            if arq and arq.filename:
-                temporario = dados.PASTA / f".sync_{secrets.token_hex(6)}.xlsx"
-                arq.save(str(temporario))
-                caminho, nome = temporario, arq.filename
-            elif caminho_txt:
-                caminho, nome = Path(caminho_txt).expanduser(), os.path.basename(caminho_txt)
-                if not caminho.is_file():
-                    return render_template("sync.html", ultimo=ultimo, erro=t("File not found: {caminho}", caminho=caminho_txt)), 400
-            else:
-                return render_template("sync.html", ultimo=ultimo, erro=t("Choose the spreadsheet file.")), 400
-            try:
-                abas, linhas_ef, deps = planilha.ler_planilha(str(caminho))
-            except Exception as e:
-                return render_template("sync.html", ultimo=ultimo, erro=t("Could not read the spreadsheet: ") + str(e)), 400
+            arq.save(str(temporario))
+            abas, linhas_ef, deps = planilha.ler_planilha(str(temporario))
+        except Exception as e:
+            return render_template("sync.html", erro=t("Could not read the spreadsheet: ") + str(e)), 400
         finally:
-            if temporario is not None and temporario.exists():
-                temporario.unlink()
-        if caminho_txt and not (arq and arq.filename):
-            banco.gravar_config("planilha_eficiencia", str(caminho))
+            temporario.unlink(missing_ok=True)
         mudancas, n_tarefas = planilha.mudancas_planilha(linhas_ef, deps)
         if not mudancas:
             flash(t("Everything is up to date: no differences between {abas} and the {n} saved samples.",
@@ -916,25 +899,6 @@ def criar_app():
         return redirect(url_for("lista"))
 
     # =====================================================================
-    # BACKUP
-    # =====================================================================
-    @app.route("/backup", methods=["POST"])
-    def backup_agora():
-        """Copia os bancos (.db) e gera as planilhas Excel imediatamente."""
-        registrar("BACKUP_NOW")
-        try:
-            criados, erros = backup.fazer_backup(forcar=True)
-        except Exception as e:
-            criados, erros = [], [str(e)]
-        if criados:
-            flash(t("Backup saved in {pasta}: ", pasta=backup.PASTA_BACKUP) + ", ".join(os.path.basename(c) for c in criados), "ok")
-        for e in erros:
-            flash(t("Backup warning: ") + e, "erro")
-        if not criados and not erros:
-            flash(t("No database found to back up."), "aviso")
-        return redirect(request.referrer or url_for("lista"))
-
-    # =====================================================================
     # CONTA, USUÁRIOS E AUDITORIA
     # =====================================================================
     @app.route("/account/password", methods=["GET", "POST"])
@@ -942,13 +906,13 @@ def criar_app():
         u = usuario()
         if request.method == "POST":
             f = request.form
-            ok, _m, _u = leptons_auth.autenticar(u["username"], f.get("atual", ""))
+            ok, _m, _u = auth.autenticar(u["username"], f.get("atual", ""))
             erro = ("Current password is incorrect." if not ok else
                     "The new passwords do not match." if f.get("nova") != f.get("nova2") else
-                    leptons_auth.validar_senha(f.get("nova", ""), u["username"]))
+                    auth.validar_senha(f.get("nova", ""), u["username"]))
             if erro:
                 return render_template("senha.html", erro=t(erro)), 400
-            leptons_auth.definir_senha(u["id"], f["nova"], trocar_senha=False, username=u["username"])
+            auth.definir_senha(u["id"], f["nova"], trocar_senha=False, username=u["username"])
             registrar("PASSWORD_CHANGE")
             flash(t("Password changed."), "ok")
             return redirect(url_for("lista"))
@@ -957,7 +921,7 @@ def criar_app():
     @app.route("/users")
     @so_admin
     def usuarios():
-        return render_template("usuarios.html", lista=leptons_auth.listar_usuarios(), perfis=leptons_auth.PERFIS)
+        return render_template("usuarios.html", lista=auth.listar_usuarios(), perfis=auth.PERFIS)
 
     @app.route("/users/new", methods=["POST"])
     @so_admin
@@ -966,7 +930,7 @@ def criar_app():
         try:
             if f.get("senha") != f.get("senha2"):
                 raise ValueError(t("The passwords do not match."))
-            leptons_auth.criar_usuario(f.get("username"), f.get("nome"), f.get("perfil"), f.get("senha", ""),
+            auth.criar_usuario(f.get("username"), f.get("nome"), f.get("perfil"), f.get("senha", ""),
                                        trocar_senha=True)
         except ValueError as e:
             flash(t(str(e)), "erro")
@@ -976,7 +940,7 @@ def criar_app():
         return redirect(url_for("usuarios"))
 
     def _usuario_por_id(user_id):
-        u = next((u for u in leptons_auth.listar_usuarios() if u[0] == user_id), None)
+        u = next((u for u in auth.listar_usuarios() if u[0] == user_id), None)
         if u is None:
             abort(404)
         return u
@@ -987,7 +951,7 @@ def criar_app():
         _id, user, nome, perfil, _ativo, _ult = _usuario_por_id(user_id)
         novo_nome, novo_perfil = request.form.get("nome", "").strip(), request.form.get("perfil")
         try:
-            leptons_auth.alterar_usuario(user_id, nome=novo_nome, perfil=novo_perfil)
+            auth.alterar_usuario(user_id, nome=novo_nome, perfil=novo_perfil)
         except ValueError as e:
             flash(t(str(e)), "erro")
             return redirect(url_for("usuarios"))
@@ -1003,11 +967,11 @@ def criar_app():
         _id, user, *_ = _usuario_por_id(user_id)
         f = request.form
         erro = ("The passwords do not match." if f.get("senha") != f.get("senha2")
-                else leptons_auth.validar_senha(f.get("senha", ""), user))
+                else auth.validar_senha(f.get("senha", ""), user))
         if erro:
             flash(f"{user}: {t(erro)}", "erro")
             return redirect(url_for("usuarios"))
-        leptons_auth.definir_senha(user_id, f["senha"], trocar_senha=True, username=user)
+        auth.definir_senha(user_id, f["senha"], trocar_senha=True, username=user)
         registrar("PASSWORD_RESET", user)
         flash(t("Temporary password set for {user}. The user must change it at the next login.", user=user), "ok")
         return redirect(url_for("usuarios"))
@@ -1020,7 +984,7 @@ def criar_app():
             flash(t("You cannot deactivate your own account."), "erro")
             return redirect(url_for("usuarios"))
         try:
-            leptons_auth.alterar_usuario(user_id, ativo=not ativo)
+            auth.alterar_usuario(user_id, ativo=not ativo)
         except ValueError as e:
             flash(t(str(e)), "erro")
             return redirect(url_for("usuarios"))
@@ -1028,22 +992,11 @@ def criar_app():
         flash(t("User {user} deactivated." if ativo else "User {user} activated.", user=user), "ok")
         return redirect(url_for("usuarios"))
 
-    def linhas_auditoria(termo):
-        t = "%" + termo + "%"
-        con = leptons_auth._con()
-        try:
-            return con.execute(
-                "SELECT quando, usuario, programa, acao, detalhe FROM auditoria "
-                "WHERE usuario LIKE ? OR programa LIKE ? OR acao LIKE ? OR detalhe LIKE ? OR quando LIKE ? "
-                "ORDER BY id DESC LIMIT 2000", (t, t, t, t, t)).fetchall()
-        finally:
-            con.close()
-
     @app.route("/audit")
     @so_admin
     def auditoria():
         q = request.args.get("q", "").strip()
-        return render_template("auditoria.html", linhas=linhas_auditoria(q), busca=q)
+        return render_template("auditoria.html", linhas=auth.linhas_auditoria(q), busca=q)
 
     @app.route("/audit.csv")
     @so_admin
@@ -1051,7 +1004,7 @@ def criar_app():
         buf = io.StringIO()
         w = csv.writer(buf)
         w.writerow(("When", "User", "Program", "Action", "Details"))
-        w.writerows(linhas_auditoria(request.args.get("q", "").strip()))
+        w.writerows(auth.linhas_auditoria(request.args.get("q", "").strip()))
         return Response(buf.getvalue(), mimetype="text/csv",
                         headers={"Content-Disposition": 'attachment; filename="audit_log.csv"'})
 
@@ -1069,23 +1022,22 @@ def criar_app():
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
-        """Usuário e senha (os mesmos dos programas de mesa); senha temporária obriga a escolher uma nova."""
+        """Usuário e senha; senha temporária obriga a escolher uma nova."""
         proxima = request.values.get("proxima", "")
         if not proxima.startswith("/") or proxima.startswith("//"):
             proxima = url_for("lista")                 # só volta para páginas deste programa
         if usuario():
             return redirect(proxima)
-        if leptons_auth.contar_usuarios() == 0:
+        if auth.contar_usuarios() == 0:
             return render_template("login.html", sem_usuarios=True)
         f = request.form
         username = f.get("username", "").strip()
         if request.method == "GET":
             return render_template("login.html", proxima=proxima)
 
-        ok, msg, u = leptons_auth.autenticar(username, f.get("senha", ""))
+        ok, msg, u = auth.autenticar(username, f.get("senha", ""))
         if not ok:
-            leptons_auth.registrar_como({"id": None, "username": username, "nome": "", "perfil": ""},
-                                        "LOGIN_FAILED", msg)
+            auth.registrar_como({"username": username}, "LOGIN_FAILED", f"{msg} (from {request.remote_addr})")
             return render_template("login.html", proxima=proxima, username=username, erro=t(msg)), 401
         if u["trocar_senha"]:
             if "nova" not in f:
@@ -1093,15 +1045,15 @@ def criar_app():
                                        senha=f.get("senha", ""))
             erro = ("The new passwords do not match." if f["nova"] != f.get("nova2") else
                     "Choose a password different from the current one." if f["nova"] == f.get("senha") else
-                    leptons_auth.validar_senha(f["nova"], u["username"]))
+                    auth.validar_senha(f["nova"], u["username"]))
             if erro:
                 return render_template("login.html", proxima=proxima, username=username, trocar=True,
                                        senha=f.get("senha", ""), erro=t(erro)), 400
-            leptons_auth.definir_senha(u["id"], f["nova"], trocar_senha=False, username=u["username"])
-            leptons_auth.registrar_como(u, "PASSWORD_CHANGE", "first access / temporary password")
+            auth.definir_senha(u["id"], f["nova"], trocar_senha=False, username=u["username"])
+            auth.registrar_como(u, "PASSWORD_CHANGE", "first access / temporary password")
         session.clear()
         session["usuario"] = {"id": u["id"], "username": u["username"], "nome": u["nome"], "perfil": u["perfil"]}
-        leptons_auth.registrar_como(u, "LOGIN")
+        auth.registrar_como(u, "LOGIN")
         return redirect(url_for("entrando", proxima=proxima))
 
     @app.route("/starting")
@@ -1114,7 +1066,7 @@ def criar_app():
 
     @app.route("/api/starting", methods=["POST"])
     def api_entrando():
-        """Passos feitos ao entrar (hoje: conferir os bancos; no futuro: sincronizar com o banco de dados)."""
+        """Passos feitos ao entrar (conferir o banco e contar os registros)."""
         try:
             return {"ok": True, "passos": [t(p) for p in inicio.ao_entrar(usuario())]}
         except Exception as e:
@@ -1135,17 +1087,9 @@ def criar_app():
     @app.route("/logout", methods=["POST"])
     def logout():
         if usuario():
-            leptons_auth.registrar_como(usuario(), "LOGOUT")
+            auth.registrar_como(usuario(), "LOGOUT")
         session.clear()
         return redirect(url_for("login"))
-
-    @app.route("/quit", methods=["POST"])
-    def sair():
-        """Botão Quit: fecha o programa (fechar a aba do navegador não fecha o servidor)."""
-        if usuario():
-            leptons_auth.registrar_como(usuario(), "LOGOUT", "quit")
-        threading.Timer(0.5, lambda: os._exit(0)).start()
-        return render_template("sair.html")
 
     def erro_pagina(mensagem, codigo=400):
         return render_template("erro.html", mensagem=mensagem), codigo
@@ -1157,6 +1101,19 @@ def criar_app():
     @app.errorhandler(404)
     def nao_achado(_e):
         return erro_pagina(t("Not found."), 404)
+
+    @app.cli.command("create-admin")
+    @click.option("--username", prompt=True)
+    @click.option("--name", prompt="Full name")
+    @click.password_option()
+    def criar_admin(username, name, password):
+        """Cria uma conta Admin (a primeira de uma instalação nova, ou se todas se perderam)."""
+        try:
+            auth.criar_usuario(username, name, "Admin", password, trocar_senha=False)
+        except ValueError as e:
+            raise click.ClickException(str(e))
+        auth.registrar_como({"username": username, "nome": name}, "USER_CREATE", f"{username} (Admin) from the command line")
+        click.echo(f"Admin {username} created.")
 
     return app
 
@@ -1173,20 +1130,3 @@ def logo_recortado(nome):
     buf = io.BytesIO()
     im.save(buf, "PNG")
     return buf.getvalue()
-
-
-# =====================================================================
-# SERVIDOR DO QR CODE E BACKUP AO ABRIR
-# =====================================================================
-def servidor_relatorios_ativo():
-    return relatorio.iniciar_servidor_relatorios()
-
-
-def tarefas_ao_abrir():
-    """Ao abrir o programa: servidor dos links do QR code e o backup semanal. Retorna os avisos do backup."""
-    servidor_relatorios_ativo()
-    try:
-        _, erros = backup.fazer_backup()
-    except Exception as e:
-        erros = [str(e)]
-    return erros

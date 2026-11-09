@@ -8,11 +8,7 @@
   <p>{{ _("Compares the <b>Deposition Control</b> and <b>Efficiency Test</b> tabs of DUNE_Control.xlsx with every saved sample (matched by run, e.g. DUNE_EVAP_#0002#) and shows only what changed before applying.") }}</p>
   <form method="post" enctype="multipart/form-data" class="form-sync">
     <label class="bloco-texto">{{ _("Upload the spreadsheet") }}
-      <input type="file" name="arquivo" accept=".xlsx,.xlsm"></label>
-    <div class="ou">{{ _("or") }}</div>
-    <label class="bloco-texto">{{ _("Read it from this computer (path)") }}
-      <input name="caminho" value="{{ ultimo }}" placeholder="/home/…/DUNE_Control.xlsx"></label>
-    <p class="nota">{{ _("The path is remembered for the next sync. An uploaded file is used only once.") }}</p>
+      <input type="file" name="arquivo" accept=".xlsx,.xlsm" required></label>
     <button class="botao primario">{{ _("Compare") }}</button>
   </form>
 </div>

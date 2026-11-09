@@ -2,7 +2,7 @@
 {% block titulo %}Audit log{% endblock %}
 {% block conteudo %}
 <div class="cabecalho"><div><h1>Audit log</h1>
-  <div class="sub">{{ _("Who did what, in the desktop programs and in this app · latest 2000 matching entries") }}</div></div>
+  <div class="sub">{{ _("Who did what · latest 2000 matching entries") }}</div></div>
   <div class="acoes">
     <form class="linha-form"><input name="q" value="{{ busca }}" placeholder="{{ _('Search user, action, details, date…') }}"><button class="botao">{{ _("Search") }}</button></form>
     <a class="botao" href="{{ url_for('auditoria_csv', q=busca or None) }}">Export CSV</a>

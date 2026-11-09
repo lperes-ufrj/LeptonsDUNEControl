@@ -1,14 +1,14 @@
 """Filtros retirados de uma sample na inspeção visual (classe A ou B): descartados ou mandados para limpeza.
 
-Cada linha de filtro_retirado (rastreabilidade.db) acompanha um filtro físico:
+Cada linha de filtro_retirado acompanha um filtro físico:
   sample de origem + posição (id_tarefa, filtro) -> descartado, ou aguardando limpeza -> lote de limpeza
-  (limpeza_id, codigo_limpeza; o lote fica no lotes.db) -> posição de uma nova sample (usado_tarefa_id, usado_filtro).
-A posição de origem fica vazia (a inspeção dela continua gravada). O programa de mesa não conhece a tabela e não
-mexe nela ao gravar; uma sample apagada por ele deixa a linha com o PID e a run copiados (origem_pid, origem_run).
+  (limpeza_id, codigo_limpeza; o lote fica em lotes_limpeza) -> posição de uma nova sample (usado_tarefa_id, usado_filtro).
+A posição de origem fica vazia (a inspeção dela continua gravada). A linha guarda o PID e a run copiados
+(origem_pid, origem_run), que continuam valendo se a sample for apagada depois que o filtro entrou num lote.
 """
 from datetime import datetime
 
-from . import banco, dados
+from . import dados, db
 from .i18n import t
 
 DESCARTE, LIMPEZA = "Discarded", "Cleaning"
@@ -42,7 +42,7 @@ def _linha(r):
 
 def _listar(onde="", params=(), con=None):
     proprio = con is None
-    con = con or banco.conectar()
+    con = con or db.conectar()
     try:
         return [_linha(r) for r in con.execute(_SQL + " " + onde, params)]
     finally:
@@ -122,7 +122,7 @@ def retirar(d, filtro, destino, obs, usuario):
     classe = (d["filtros"].get(filtro) or {}).get("classification") or ""
     if classe not in CLASSES_RETIRAVEIS:
         return None, t("Only filters classified A or B can be removed (filter {n} is {classe}).", n=filtro, classe=classe or "–")
-    con = banco.conectar()
+    con = db.conectar()
     try:
         if con.execute("SELECT 1 FROM filtro_retirado WHERE id_tarefa = ? AND filtro = ?", (d["id"], filtro)).fetchone():
             return None, t("Filter {n} was already removed from this sample.", n=filtro)
@@ -144,7 +144,7 @@ def desfazer(retirado_id):
     if r["limpeza_id"] is not None:
         return r, t("Filter {rotulo} is already in cleaning lot {codigo}: remove it from the lot first.",
                     rotulo=r["rotulo"], codigo=r["codigo_limpeza"] or "?")
-    con = banco.conectar()
+    con = db.conectar()
     try:
         with con:
             con.execute("DELETE FROM filtro_retirado WHERE id = ?", (retirado_id,))
@@ -168,7 +168,7 @@ def definir_limpeza(limpeza_id, codigo, ids):
     """O lote passa a ter os filtros ids; os que saíram (e não foram usados) voltam a aguardar limpeza.
     Retorna (ids que entraram, ids que saíram)."""
     ids = set(ids)
-    con = banco.conectar()
+    con = db.conectar()
     try:
         atuais = {r["id"]: r for r in _listar("WHERE r.limpeza_id = ?", (limpeza_id,), con)}
         saem = [i for i, r in atuais.items() if i not in ids and not r["usado_tarefa_id"]]
@@ -187,7 +187,7 @@ def definir_limpeza(limpeza_id, codigo, ids):
 
 def soltar_limpeza(limpeza_id):
     """Lote de limpeza apagado: os filtros ainda não usados voltam a aguardar limpeza (os usados guardam o código)."""
-    con = banco.conectar()
+    con = db.conectar()
     try:
         with con:
             return con.execute("UPDATE filtro_retirado SET limpeza_id = NULL, codigo_limpeza = NULL "
@@ -209,7 +209,7 @@ def origem_texto(linhas):
 def disponiveis(tarefa_id=None):
     """{id do lote de limpeza: [{id, rotulo, classe}]}: filtros limpos ainda não usados (ou usados por esta sample)."""
     saida = {}
-    for r in sorted(_listar("WHERE r.limpeza_id IS NOT NULL AND (r.usado_tarefa_id IS NULL OR r.usado_tarefa_id IS ?)",
+    for r in sorted(_listar("WHERE r.limpeza_id IS NOT NULL AND (r.usado_tarefa_id IS NULL OR r.usado_tarefa_id <=> ?)",
                             (tarefa_id,)), key=ordem):
         saida.setdefault(r["limpeza_id"], []).append({"id": r["id"], "rotulo": r["rotulo"], "classe": r["classe"]})
     return saida

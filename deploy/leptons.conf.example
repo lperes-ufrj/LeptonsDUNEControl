@@ -1,0 +1,26 @@
+# Configuração do Deposition Control System.
+# No servidor: /etc/leptons/leptons.conf (dono root, grupo leptons, permissão 640 — contém a senha do banco).
+# Em outro lugar: aponte a variável de ambiente LEPTONS_CONFIG para o arquivo.
+
+[database]
+host = 192.0.2.10
+port = 3306
+name = leptons
+user = leptons
+password = troque-esta-senha
+
+[app]
+# Assina o cookie de login. Gerar com:  python3 -c "import secrets; print(secrets.token_hex(32))"
+# Trocar a chave desconecta todos os usuários.
+secret_key =
+
+# Pasta dos arquivos gerados e enviados (PDFs, anexos das amostras, arquivos de controle dos lotes).
+# Caminho relativo = a partir da pasta deste arquivo.
+data_dir = /var/lib/leptons
+
+# Endereço usado nos links dos QR codes, ex.: https://leptons.exemplo.ufrj.br
+# Vazio = o endereço pelo qual a página foi aberta.
+public_url =
+
+# Cookie de login só por HTTPS. Deixe "true" no servidor; "false" só para testar sem HTTPS.
+secure_cookies = true

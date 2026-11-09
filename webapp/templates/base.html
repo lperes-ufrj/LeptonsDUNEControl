@@ -42,10 +42,6 @@
       <form action="{{ url_for('logout') }}" method="post">
         <button class="botao sair">{{ _("Log out") }}</button>
       </form>
-      <form action="{{ url_for('sair') }}" method="post"
-            onsubmit='return confirm({{ _("Close the Deposition Control browser app?")|tojson }})'>
-        <button class="botao sair" title="{{ _('Stop the program (closing the tab keeps it running)') }}">{{ _("Quit") }}</button>
-      </form>
     </div>
   </header>
 

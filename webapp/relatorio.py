@@ -1,33 +1,20 @@
-"""Relatório da tarefa em HTML (página de opções do QR code e as páginas de cada seção), a imagem do QR code e o
-servidor leve que deixa celulares da mesma rede abrirem o link do QR.
+"""Relatório da tarefa em HTML (página de opções do QR code e as páginas de cada seção) e a imagem do QR code.
 
-O conteúdo das páginas é o mesmo do programa de mesa (mesmos links /t/<id>/<código>/...: QR codes já impressos
-continuam funcionando).
+O link do QR code (/t/<id>/<código>/) abre as páginas sem login: o código é um HMAC do id da tarefa com um
+segredo guardado no banco (config_sistema), então só quem tem o QR (ou o link) chega ao relatório.
 """
 import base64
+import hashlib
 import hmac
 import html
-import os
-import re
-import socket
-import threading
-import urllib.parse
+import secrets
 from datetime import datetime
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import qrcode
+from flask import request
 from PIL import Image, ImageDraw, ImageFont
 
-from . import banco, dados, lotes, retirados
-
-# Modo 1 (padrão): URL_BASE_RELATORIO vazio -> o servidor leve na porta abaixo atende o link do QR para
-#                  celulares/computadores na mesma rede, enquanto o programa estiver aberto.
-# Modo 2: URL_BASE_RELATORIO = endereço onde a pasta de relatórios será publicada; as páginas são gravadas em
-#         PASTA_RELATORIOS e basta copiá-las para esse endereço.
-SERVIDOR_PORTA = 8765
-URL_BASE_RELATORIO = ""
-PASTA_RELATORIOS = dados.PASTA / "relatorios"
-servidor_http = None
+from . import config, dados, db, lotes, retirados
 
 N_FILTROS = dados.N_FILTROS
 AMOSTRAS_IMERSAO = AMOSTRAS_EFICIENCIA = dados.AMOSTRAS
@@ -36,7 +23,6 @@ LIMITE_PERDA_PCT = dados.LIMITE_PERDA_PCT
 LIMITE_EFICIENCIA = dados.LIMITE_EFICIENCIA
 MIN_AMOSTRAS_EFICIENCIA = dados.MIN_AMOSTRAS_EFICIENCIA
 CORES_CLASSE = {"A": "#c62828", "B": "#ef6c00", "C": "#2e7d32"}
-token_tarefa = banco.token_tarefa
 area_amostra_ef = dados.area_amostra_ef
 resumo_visual_dados = dados.resumo_visual
 estado_imersao_dados = dados.estado_imersao
@@ -54,12 +40,12 @@ def diferenca_massas_ef(r):
 
 
 def coletar_dados_relatorio(tarefa_id):
-    """Tudo o que entra no relatório, no formato das funções abaixo (vindas do programa de mesa)."""
+    """Tudo o que entra no relatório, no formato das funções abaixo."""
     d = dados.ler_tarefa(tarefa_id)
     if d is None:
         return None
     t = d["tarefa"]
-    con = dados._conectar(dados.DB_TAREFAS)
+    con = db.conectar()
     try:
         linhas = [dict(r) for r in con.execute("SELECT * FROM tarefa_lotes WHERE id_tarefa = ? ORDER BY id", (tarefa_id,))]
     finally:
@@ -488,80 +474,27 @@ def renderizar_pagina(tarefa_id, nome):
     return pagina_relatorio(d, nome)
 
 
-# ---------------- servidor local ----------------
-class _HandlerRelatorio(BaseHTTPRequestHandler):
-    def log_message(self, *args):
-        pass
-
-    def _enviar(self, codigo, texto):
-        dados = texto.encode("utf-8")
-        self.send_response(codigo)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(dados)))
-        self.end_headers()
-        self.wfile.write(dados)
-
-    def do_GET(self):
-        caminho = urllib.parse.urlparse(self.path).path
-        m = re.fullmatch(r"/t/(\d+)/([0-9a-f]{12})/(?:(index|completo|visual|crio|eficiencia)\.html)?", caminho)
-        if not m:
-            self._enviar(404, _documento("Not found", "<p>Not found.</p>"))
-            return
-        tarefa_id = int(m.group(1))
-        try:
-            if not hmac.compare_digest(m.group(2), token_tarefa(tarefa_id)):
-                self._enviar(404, _documento("Not found", "<p>Not found.</p>"))
-                return
-            self._enviar(200, renderizar_pagina(tarefa_id, m.group(3) or "index"))
-        except Exception:
-            self._enviar(500, _documento("Error", "<p>Could not generate the report.</p>"))
-
-
-def iniciar_servidor_relatorios():
-    """Inicia o servidor leve em segundo plano (modo 1). Retorna True se estiver ativo."""
-    global servidor_http
-    if URL_BASE_RELATORIO or servidor_http is not None:
-        return servidor_http is not None
+# ---------------- link do QR code ----------------
+def token_tarefa(tarefa_id):
+    """Código do link do relatório da tarefa (12 caracteres hexadecimais)."""
+    con = db.conectar()
     try:
-        servidor_http = ThreadingHTTPServer(("0.0.0.0", SERVIDOR_PORTA), _HandlerRelatorio)
-    except OSError:
-        servidor_http = None
-        return False
-    threading.Thread(target=servidor_http.serve_forever, daemon=True).start()
-    return True
+        con.execute("INSERT IGNORE INTO config_sistema (chave, valor) VALUES ('segredo_qr', ?)", (secrets.token_hex(16),))
+        con.commit()
+        segredo = con.execute("SELECT valor FROM config_sistema WHERE chave = 'segredo_qr'").fetchone()[0]
+    finally:
+        con.close()
+    return hmac.new(segredo.encode(), str(tarefa_id).encode(), hashlib.sha256).hexdigest()[:12]
 
 
-def ip_local():
-    try:
-        sk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sk.connect(("10.255.255.255", 1))     # não envia nada; só descobre a interface de rede usada
-        ip = sk.getsockname()[0]
-        sk.close()
-        return ip
-    except Exception:
-        try:
-            return socket.gethostbyname(socket.gethostname())
-        except Exception:
-            return "127.0.0.1"
+def codigo_valido(tarefa_id, codigo):
+    return hmac.compare_digest(str(codigo), token_tarefa(tarefa_id))
 
 
 def url_relatorio(tarefa_id, nome="index"):
-    tok = token_tarefa(tarefa_id)
-    if URL_BASE_RELATORIO:
-        return URL_BASE_RELATORIO.rstrip("/") + "/" + str(tarefa_id) + "_" + tok + "/" + nome + ".html"
-    return "http://" + ip_local() + ":" + str(SERVIDOR_PORTA) + "/t/" + str(tarefa_id) + "/" + tok + "/" + nome + ".html"
-
-
-def gerar_arquivos_relatorio(tarefa_id):
-    """Grava as páginas HTML da tarefa em PASTA_RELATORIOS (modo 2). Retorna a pasta."""
-    pasta = os.path.join(PASTA_RELATORIOS, str(tarefa_id) + "_" + token_tarefa(tarefa_id))
-    os.makedirs(pasta, exist_ok=True)
-    d = coletar_dados_relatorio(tarefa_id)
-    for nome in PAGINAS_RELATORIO:
-        texto = pagina_menu(d) if nome == "index" else pagina_relatorio(d, nome)
-        with open(os.path.join(pasta, nome + ".html"), "w", encoding="utf-8") as f:
-            f.write(texto)
-    return pasta
+    """Link do QR code. Usa o public_url da configuração ou, sem ele, o endereço pelo qual a página foi aberta."""
+    base = config.URL_PUBLICA or request.url_root.rstrip("/")
+    return f"{base}/t/{tarefa_id}/{token_tarefa(tarefa_id)}/{nome}.html"
 
 
 # ---------------- QR code ----------------

@@ -14,7 +14,7 @@ import statistics
 import zipfile
 from datetime import date, datetime, timedelta
 
-from . import chegada, dados, lotes, retirados
+from . import chegada, dados, db, lotes, retirados
 from .i18n import t
 
 COR_POSICAO = {2: 1, 3: 2, 14: 3}          # posição -> cor da série (1, 2, 3 = azul, laranja, verde-água)
@@ -186,9 +186,8 @@ def _origem_posicoes(d, gravada):
 
 def ler_amostras():
     """Todas as samples, já com os estados calculados (as mesmas regras da lista)."""
-    conn = dados._conectar(dados.DB_TAREFAS)
+    conn = db.conectar()
     try:
-        lotes_ = dados._lotes_por_tarefa(conn)
         internos, limpezas = dados.codigos_lotes_internos()
         origem = {}                  # {id: {posição: (tipo, código do lote interno)}} da janela Filter origin
         for r in conn.execute("SELECT id_tarefa, filtro, tipo_lote, lote_interno_id, codigo_lote_interno FROM filtro_origem"):
@@ -196,8 +195,7 @@ def ler_amostras():
             codigo = (limpezas if tipo == "limpeza" else internos).get(r["lote_interno_id"]) or r["codigo_lote_interno"] or ""
             origem.setdefault(r["id_tarefa"], {})[r["filtro"]] = (tipo, codigo)
         saida = []
-        for linha in conn.execute("SELECT * FROM tarefas"):
-            d = dados._dados_tarefa(conn, dict(linha), lotes_.get(linha["id"], []))
+        for d in dados.dados_tarefas(conn):
             d["status"] = dados.status(d)
             d["estado_imersao"], d["estado_eficiencia"] = dados.estado_imersao(d), dados.estado_eficiencia(d)
             d["decisao"] = dados.decisao_lote(d["estado_imersao"], d["estado_eficiencia"])

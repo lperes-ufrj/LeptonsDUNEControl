@@ -16,9 +16,6 @@ PT = {
     "Search run, PID, batch, responsible…": "Buscar run, PID, batch, responsável…",
     "change my password": "trocar minha senha",
     "Log out": "Sair",
-    "Quit": "Fechar",
-    "Close the Deposition Control browser app?": "Fechar o Deposition Control no navegador?",
-    "Stop the program (closing the tab keeps it running)": "Encerra o programa (fechar a aba não o encerra)",
     "Language of the screens (reports and PDFs stay in English)": "Idioma das telas (relatórios e PDFs ficam em inglês)",
     "Inspection result": "Resultado da inspeção",
     "All batches": "Todos os batches",
@@ -46,7 +43,6 @@ PT = {
     "search": "busca",
     "show all": "mostrar todos",
     "All": "Todas",
-    "or": "ou",
     " or ": " ou ",
     "to": "a",
     "Yes": "Sim",
@@ -102,7 +98,6 @@ PT = {
     "Click to edit": "Clique para editar",
     "Print report (PDF)": "Imprimir relatório (PDF)",
     "Open report": "Abrir relatório",
-    "Backup now": "Fazer backup agora",
 
     # ---------------- lista de samples ----------------
     "Deposition samples": "Samples de deposição",
@@ -300,16 +295,9 @@ PT = {
     "Scan to open the report options": "Escaneie para abrir as opções do relatório",
     "Copy link": "Copiar link",
     "Download QR image": "Baixar imagem do QR",
-    "Report files saved in: {pasta}. Publish this folder at {url} so the QR link works.":
-        "Arquivos do relatório gravados em: {pasta}. Publique esta pasta em {url} para o link do QR funcionar.",
-    "The link works on devices connected to the same network as this computer, while this program is open. If it does not open, allow Python through the firewall for private networks.":
-        "O link funciona em aparelhos conectados à mesma rede deste computador, enquanto este programa estiver "
-        "aberto. Se não abrir, libere o Python no firewall para redes privadas.",
-    "The report server could not start on port {porta} (port in use – is the desktop program open? It serves the same links while it is open).":
-        "O servidor de relatórios não pôde iniciar na porta {porta} (porta em uso – o programa de mesa está aberto? "
-        "Ele atende os mesmos links enquanto estiver aberto).",
+    "The link opens the report pages without a login, on any device that can reach this server.":
+        "O link abre as páginas do relatório sem login, em qualquer aparelho que acesse este servidor.",
     "{n} PDF(s) saved": "{n} PDF(s) gravado(s)",
-    "Folder on this computer:": "Pasta neste computador:",
     "{n} failed": "{n} com erro",
     "Download all (ZIP)": "Baixar todos (ZIP)",
 
@@ -321,8 +309,8 @@ PT = {
         "O arquivo é carregado no formulário da sample para revisão; nada é gravado até você clicar em Salvar.",
     "Load over sample ID {n}": "Carregar sobre a sample ID {n}",
     "Load as a new sample": "Carregar como uma nova sample",
-    "Choose a file created by <b>Export sample (JSON)</b> (in this app or in the desktop program). The sample opens in the form for review; it is saved only when you click Save.":
-        "Escolha um arquivo criado por <b>Exportar sample (JSON)</b> (neste app ou no programa de mesa). A sample "
+    "Choose a file created by <b>Export sample (JSON)</b> (here or in another installation). The sample opens in the form for review; it is saved only when you click Save.":
+        "Escolha um arquivo criado por <b>Exportar sample (JSON)</b> (aqui ou em outra instalação). A sample "
         "abre no formulário para revisão; só é gravada quando você clicar em Salvar.",
     "Load": "Carregar",
     "Choose a .json file.": "Escolha um arquivo .json.",
@@ -335,19 +323,15 @@ PT = {
         "Sample {pid} carregada de {arquivo}. Confira os dados e clique em Salvar para criá-la.",
     "Sample {pid} loaded from {arquivo}. Review the data, then click Save to overwrite sample ID {n}.":
         "Sample {pid} carregada de {arquivo}. Confira os dados e clique em Salvar para substituir a sample ID {n}.",
-    "These batches are not registered on this computer (they are kept with their codes): ":
-        "Estes batches não estão cadastrados neste computador (são mantidos com os seus códigos): ",
+    "These batches are not registered here (they are kept with their codes): ":
+        "Estes batches não estão cadastrados aqui (são mantidos com os seus códigos): ",
 
     # ---------------- Sync Leptons Control Sheet ----------------
     "Compares the <b>Deposition Control</b> and <b>Efficiency Test</b> tabs of DUNE_Control.xlsx with every saved sample (matched by run, e.g. DUNE_EVAP_#0002#) and shows only what changed before applying.":
         "Compara as abas <b>Deposition Control</b> e <b>Efficiency Test</b> do DUNE_Control.xlsx com todas as samples "
         "gravadas (pela run, ex.: DUNE_EVAP_#0002#) e mostra só o que mudou antes de aplicar.",
     "Upload the spreadsheet": "Enviar a planilha",
-    "Read it from this computer (path)": "Ler deste computador (caminho)",
-    "The path is remembered for the next sync. An uploaded file is used only once.":
-        "O caminho fica guardado para o próximo sync. Um arquivo enviado é usado só uma vez.",
     "Compare": "Comparar",
-    "File not found: {caminho}": "Arquivo não encontrado: {caminho}",
     "Choose the spreadsheet file.": "Escolha o arquivo da planilha.",
     "Could not read the spreadsheet: ": "Não foi possível ler a planilha: ",
     "Everything is up to date: no differences between {abas} and the {n} saved samples.":
@@ -382,11 +366,6 @@ PT = {
     "Sheet row": "Linha da planilha",
     "(empty)": "(vazio)",
     "Apply changes": "Aplicar alterações",
-
-    # ---------------- backup ----------------
-    "Backup saved in {pasta}: ": "Backup gravado em {pasta}: ",
-    "Backup warning: ": "Aviso do backup: ",
-    "No database found to back up.": "Nenhum banco de dados encontrado para o backup.",
 
     # ---------------- batches ----------------
     "{n} batch": "{n} batch",
@@ -437,7 +416,7 @@ PT = {
     "Cleaning procedure verified?": "Procedimento de limpeza verificado?",
     "Traceability and notes": "Rastreabilidade e notas",
     "Supplier control file": "Arquivo de controle do fornecedor",
-    "file not found on this computer": "arquivo não encontrado neste computador",
+    "file not found on the server": "arquivo não encontrado no servidor",
     "Batch {lote} ({tracking}) saved.": "Batch {lote} ({tracking}) gravado.",
     "Batch {lote} ({tracking}) updated.": "Batch {lote} ({tracking}) atualizado.",
     "Batch {lote} ({tracking}) deleted.": "Batch {lote} ({tracking}) excluído.",
@@ -472,11 +451,9 @@ PT = {
     "Fill empty rows ({prefixo}0001…)": "Preencher linhas vazias ({prefixo}0001…)",
     "Clear codes": "Limpar códigos",
     "Traceability document": "Documento de rastreabilidade",
-    "Supplier control file (path on this computer)": "Arquivo de controle do fornecedor (caminho neste computador)",
-    "Upload a new file": "Enviar um novo arquivo",
-    "PDF, Excel, CSV, Word or text. An uploaded file is copied to the <span class=\"mono\">arquivos_lotes</span> folder and replaces the path above.":
-        "PDF, Excel, CSV, Word ou texto. Um arquivo enviado é copiado para a pasta "
-        "<span class=\"mono\">arquivos_lotes</span> e substitui o caminho acima.",
+    "PDF, Excel, CSV, Word or text. A new file replaces the saved one.":
+        "PDF, Excel, CSV, Word ou texto. Um arquivo novo substitui o gravado.",
+    "Saved file:": "Arquivo gravado:",
     "Open the saved file": "Abrir o arquivo gravado",
     "Box {i:02d}: type only the number (digits), e.g. 0004.": "Caixa {i:02d}: digite só o número (dígitos), ex.: 0004.",
     "Filters in box {i:02d} must be an integer.": "Os filtros da caixa {i:02d} devem ser um número inteiro.",
@@ -519,8 +496,8 @@ PT = {
 
     # ---------------- usuários e senhas ----------------
     "Manage users": "Gerenciar usuários",
-    "The same users as the desktop programs (usuarios.db). New users choose their own password at the first login.":
-        "Os mesmos usuários dos programas de mesa (usuarios.db). Usuários novos escolhem a própria senha no primeiro login.",
+    "New users choose their own password at the first login.":
+        "Usuários novos escolhem a própria senha no primeiro login.",
     "Full name": "Nome completo",
     "Role": "Perfil",
     "Active": "Ativo",
@@ -568,15 +545,14 @@ PT = {
     "There must be at least one active Admin.": "Deve haver pelo menos um Admin ativo.",
 
     # ---------------- login, entrada, saída ----------------
-    "No users are registered yet. Open the desktop program once to create the first administrator account, then reload this page.":
-        "Ainda não há usuários cadastrados. Abra o programa de mesa uma vez para criar a primeira conta de "
-        "administrador e recarregue esta página.",
+    "No users are registered yet. Ask the system administrator to create the first Admin account, then reload this page.":
+        "Ainda não há usuários cadastrados. Peça ao administrador do sistema para criar a primeira conta Admin e "
+        "recarregue esta página.",
     "Choose a new password before continuing.": "Escolha uma nova senha antes de continuar.",
     "Sign in with your lab username and password.": "Entre com o seu usuário e senha do laboratório.",
     "Save and sign in": "Salvar e entrar",
     "Password": "Senha",
     "Log in": "Entrar",
-    "Quit program": "Fechar o programa",
     "Starting": "Iniciando",
     "Welcome, {nome}": "Bem-vindo(a), {nome}",
     "Checking the databases…": "Conferindo os bancos de dados…",
@@ -586,16 +562,10 @@ PT = {
     "Ready": "Pronto",
     "{n} deposition samples found": "{n} samples de deposição encontradas",
     "{n} batch(es) in the batch database": "{n} batch(es) no banco de batches",
-    "Batch database not readable": "Não foi possível ler o banco de batches",
-    "Batch database not found": "Banco de batches não encontrado",
-    "Closed": "Fechado",
-    "Deposition Control closed": "Deposition Control fechado",
-    "You can close this tab. Run <span class=\"mono\">python leptons_web.py</span> to open it again.":
-        "Você pode fechar esta aba. Rode <span class=\"mono\">python leptons_web.py</span> para abrir de novo.",
 
     # ---------------- audit log ----------------
-    "Who did what, in the desktop programs and in this app · latest 2000 matching entries":
-        "Quem fez o quê, nos programas de mesa e neste app · últimas 2000 entradas encontradas",
+    "Who did what · latest 2000 matching entries":
+        "Quem fez o quê · últimas 2000 entradas encontradas",
     "Search user, action, details, date…": "Buscar usuário, ação, detalhes, data…",
     "When": "Quando",
     "User": "Usuário",
